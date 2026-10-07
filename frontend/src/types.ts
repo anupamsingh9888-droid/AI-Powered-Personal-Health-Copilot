@@ -118,7 +118,7 @@ export interface Appointment {
   clinic: string
   date: string
   time: string
-  status: 'confirmed' | 'completed' | 'cancelled'
+  status: 'requested' | 'confirmed' | 'completed' | 'cancelled'
   hasReminder: boolean
   notes?: string
 }

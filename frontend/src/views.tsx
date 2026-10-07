@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   ArrowDown,
+  ArrowLeft,
   ArrowRight,
   ArrowUpRight,
   Check,
@@ -34,7 +35,7 @@ import {
   Save,
   X,
 } from 'lucide-react'
-import { Badge, Btn, Card, ConfBar, ConfRing, DocPaper, Eyebrow, PageHead, cx, useEvidence, useL, useToast, type StatusKey } from './ui'
+import { Badge, Btn, Card, ConfBar, ConfRing, DocPaper, Eyebrow, PageHead, cx, useEvidence, useL, useToast, formatAppointmentDate, type StatusKey } from './ui'
 import type { ConditionInfo, Appointment, MedicationItem, HealthAlert, UserHealthProfile } from './types'
 
 export type Go = (v: string, extra?: any) => void
@@ -46,6 +47,14 @@ interface HomeProps {
   appointments: Appointment[]
   medications: MedicationItem[]
   alerts: HealthAlert[]
+  recentActivities?: {
+    date: string
+    type: string
+    title: string
+    note: string
+    s: StatusKey
+    icon?: any
+  }[]
   onMedicationStatusChange: (id: string, action: 'taken' | 'skip' | 'reset') => void
   onQuickAskAi?: (prompt: string) => void
 }
@@ -57,6 +66,7 @@ export function Home({
   appointments,
   medications,
   alerts,
+  recentActivities,
   onMedicationStatusChange,
   onQuickAskAi,
 }: HomeProps) {
@@ -66,7 +76,8 @@ export function Home({
   const [askInput, setAskInput] = useState('')
 
   const userName = user?.name ? user.name.split(' ')[0] : 'Alex'
-  const upcomingAppointment = appointments.find((a) => a.status === 'confirmed')
+  // Support active upcoming appointments (confirmed or requested)
+  const upcomingAppointment = appointments.find((a) => a.status === 'confirmed' || a.status === 'requested')
 
   const handleAskSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -76,6 +87,46 @@ export function Home({
     }
     go('chat', { prompt: askInput.trim() })
   }
+
+  // Dynamic relative date for upcoming appointment
+  const dynamicAptDate = upcomingAppointment ? formatAppointmentDate(upcomingAppointment.date) : ''
+
+  // Recent activity default fallback (Alex Rao demo)
+  const defaultActivities = [
+    {
+      date: '07 OCT',
+      type: 'Blood Test',
+      title: 'CBC Report (Meridian Diagnostics)',
+      note: '1 item needs attention · Hemoglobin 10.8 g/dL (Below reference range)',
+      s: 'attention' as StatusKey,
+      icon: FlaskConical,
+    },
+    {
+      date: '04 OCT',
+      type: 'Prescription',
+      title: 'Prescription (Dr. R. Menon)',
+      note: '3 medications extracted & verified · 1 awaiting confirmation',
+      s: 'verified' as StatusKey,
+      icon: Pill,
+    },
+    {
+      date: '28 SEP',
+      type: 'Clinic Consultation',
+      title: 'Doctor Visit (Sunrise Family Clinic)',
+      note: 'Blood pressure 118/76 mmHg · Pulse 68 bpm recorded',
+      s: 'neutral' as StatusKey,
+      icon: Stethoscope,
+    },
+    {
+      date: '12 SEP',
+      type: 'Discharge Summary',
+      title: 'Hospital Visit (City General Hospital)',
+      note: 'Discharged in stable condition · Normal vital indicators',
+      s: 'neutral' as StatusKey,
+      icon: Hospital,
+    },
+  ]
+  const displayActivities = recentActivities !== undefined ? recentActivities : defaultActivities
 
   return (
     <div className="anim-fade-up mx-auto max-w-6xl space-y-9">
@@ -89,63 +140,119 @@ export function Home({
         </p>
       </div>
 
-      {/* SECTION 1: Health Alerts */}
-      {alerts.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex items-center gap-2">
+      {/* SECTION 1: Conditional Health Alerts */}
+      <section className="space-y-3">
+        <div className="flex items-center gap-2">
+          {alerts.length > 0 ? (
             <AlertCircle size={18} className="text-amber-600" />
-            <h2 className="font-display text-lg font-bold text-slate-900">
-              {L('Important Health Alerts', 'ज़रूरी स्वास्थ्य सूचनाएँ')}
-            </h2>
-          </div>
+          ) : (
+            <CheckCircle2 size={18} className="text-teal-600" />
+          )}
+          <h2 className="font-display text-lg font-bold text-slate-900">
+            {L('Important Health Alerts', 'ज़रूरी स्वास्थ्य सूचनाएँ')}
+          </h2>
+        </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-            {alerts.map((al) => (
-              <Card
-                key={al.id}
-                className={cx(
-                  'p-4.5 transition-all hover:shadow-md flex flex-col justify-between border-l-4',
-                  al.type === 'attention'
-                    ? 'border-l-amber-500 bg-amber-50/20'
-                    : al.type === 'appointment'
-                    ? 'border-l-teal-600 bg-teal-50/20'
-                    : 'border-l-sky-500 bg-sky-50/20'
+        {alerts.length === 0 ? (
+          <Card className="p-5 border-slate-200/90 bg-slate-50/60 flex items-center gap-4">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-teal-50 text-teal-700 border border-teal-200">
+              <CheckCircle2 size={20} />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">
+                {L('No health alerts right now', 'वर्तमान में कोई स्वास्थ्य चेतावनी नहीं')}
+              </h3>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {L(
+                  "We'll highlight important changes when they appear in your health records.",
+                  'जब आपके स्वास्थ्य रिकॉर्ड में कोई महत्वपूर्ण बदलाव आएगा, हम यहाँ सूचित करेंगे।'
                 )}
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                      {al.type === 'attention' ? L('Needs Attention', 'ध्यान दें') : al.type === 'appointment' ? L('Upcoming', 'आगामी') : L('Verification', 'सत्यापन')}
-                    </span>
-                    <span className={cx(
-                      'h-2 w-2 rounded-full',
-                      al.type === 'attention' ? 'bg-amber-500' : 'bg-teal-500'
-                    )} />
-                  </div>
-                  <h3 className="text-sm font-bold text-slate-900">{L(al.title, al.titleHi)}</h3>
-                  <p className="mt-1 text-xs text-slate-600 leading-relaxed">{L(al.description, al.descriptionHi)}</p>
-                </div>
+              </p>
+            </div>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+            {alerts.map((al) => {
+              // Dynamic appointment date calculation if alert describes appointment
+              let alertDesc = al.description
+              let alertDescHi = al.descriptionHi
+              if (al.type === 'appointment' && upcomingAppointment) {
+                const isToday = dynamicAptDate.toLowerCase().startsWith('today')
+                const isTmrw = dynamicAptDate.toLowerCase().startsWith('tomorrow')
+                const prefixEn = isToday ? 'Today' : isTmrw ? 'Tomorrow' : dynamicAptDate
+                const prefixHi = isToday ? 'आज' : isTmrw ? 'कल' : dynamicAptDate
+                alertDesc = `${prefixEn} at ${upcomingAppointment.time} with ${upcomingAppointment.doctorName} at ${upcomingAppointment.clinic}.`
+                alertDescHi = `${prefixHi} ${upcomingAppointment.time} बजे ${upcomingAppointment.doctorName} के साथ अपॉइंटमेंट निर्धारित है।`
+              }
 
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                  <span className="text-[11px] text-slate-400 truncate max-w-[140px]">{al.source || 'Medical Vault'}</span>
-                  <button
-                    onClick={() => {
-                      if (al.actionView === 'summary') go('summary')
-                      else if (al.actionView === 'appointments') go('appointments')
-                      else if (al.actionView === 'medications') go('medications')
-                      else go(al.actionView)
-                    }}
-                    className="text-xs font-bold text-teal-800 hover:text-teal-950 flex items-center gap-1 cursor-pointer"
-                  >
-                    <span>{al.actionLabel}</span>
-                    <ArrowRight size={12} />
-                  </button>
-                </div>
-              </Card>
-            ))}
+              return (
+                <Card
+                  key={al.id}
+                  className={cx(
+                    'p-4.5 transition-all hover:shadow-md flex flex-col justify-between border-l-4',
+                    al.type === 'attention'
+                      ? 'border-l-amber-500 bg-amber-50/20'
+                      : al.type === 'appointment'
+                      ? 'border-l-teal-600 bg-teal-50/20'
+                      : 'border-l-sky-500 bg-sky-50/20'
+                  )}
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                        {al.type === 'attention' ? (
+                          <>
+                            <AlertCircle size={12} className="text-amber-600" />
+                            <span>{L('Needs Attention', 'ध्यान दें')}</span>
+                          </>
+                        ) : al.type === 'appointment' ? (
+                          <>
+                            <Calendar size={12} className="text-teal-600" />
+                            <span>{L('Upcoming', 'आगामी')}</span>
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck size={12} className="text-sky-600" />
+                            <span>{L('Verification', 'सत्यापन')}</span>
+                          </>
+                        )}
+                      </span>
+                      <span
+                        className={cx(
+                          'h-2 w-2 rounded-full',
+                          al.type === 'attention' ? 'bg-amber-500' : 'bg-teal-500'
+                        )}
+                      />
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-900">{L(al.title, al.titleHi)}</h3>
+                    <p className="mt-1 text-xs text-slate-600 leading-relaxed">
+                      {L(alertDesc, alertDescHi)}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <span className="text-[11px] text-slate-400 truncate max-w-[140px]">
+                      {al.source || 'Medical Vault'}
+                    </span>
+                    <button
+                      onClick={() => {
+                        if (al.actionView === 'summary') go('summary')
+                        else if (al.actionView === 'appointments') go('appointments')
+                        else if (al.actionView === 'medications') go('medications')
+                        else go(al.actionView)
+                      }}
+                      className="text-xs font-bold text-teal-800 hover:text-teal-950 flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>{al.actionLabel}</span>
+                      <ArrowRight size={12} />
+                    </button>
+                  </div>
+                </Card>
+              )
+            })}
           </div>
-        </section>
-      )}
+        )}
+      </section>
 
       {/* SECTION 2 & SECTION 3: UPCOMING APPOINTMENT & MEDICATION REMINDERS (Side by Side) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -157,16 +264,49 @@ export function Home({
                 <Calendar size={15} className="text-teal-600" />
                 {L('Upcoming Doctor Appointment', 'आगामी डॉक्टर अपॉइंटमेंट')}
               </span>
-              <span className="px-2.5 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 text-xs font-semibold">
-                {L('Confirmed', 'पुष्ट')}
-              </span>
+              {upcomingAppointment && (
+                <span
+                  className={cx(
+                    'px-2.5 py-0.5 rounded-full text-xs font-semibold border inline-flex items-center gap-1',
+                    upcomingAppointment.status === 'confirmed'
+                      ? 'bg-teal-50 text-teal-800 border-teal-200'
+                      : upcomingAppointment.status === 'requested'
+                      ? 'bg-amber-50 text-amber-800 border-amber-200'
+                      : upcomingAppointment.status === 'cancelled'
+                      ? 'bg-rose-50 text-rose-800 border-rose-200'
+                      : 'bg-slate-100 text-slate-700 border-slate-200'
+                  )}
+                >
+                  {upcomingAppointment.status === 'confirmed' ? (
+                    <>
+                      <CheckCircle2 size={12} className="text-teal-600" />
+                      <span>{L('Confirmed', 'पुष्ट')}</span>
+                    </>
+                  ) : upcomingAppointment.status === 'requested' ? (
+                    <>
+                      <Clock size={12} className="text-amber-600" />
+                      <span>{L('Requested', 'अनुरोधित')}</span>
+                    </>
+                  ) : upcomingAppointment.status === 'cancelled' ? (
+                    <>
+                      <X size={12} className="text-rose-600" />
+                      <span>{L('Cancelled', 'रद्द')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check size={12} className="text-slate-600" />
+                      <span>{L('Completed', 'पूर्ण')}</span>
+                    </>
+                  )}
+                </span>
+              )}
             </div>
 
             {upcomingAppointment ? (
               <div className="space-y-3">
                 <div className="flex items-baseline gap-2">
                   <span className="font-display text-2xl font-bold text-slate-900">
-                    {upcomingAppointment.date}
+                    {dynamicAptDate}
                   </span>
                   <span className="text-sm font-semibold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">
                     {upcomingAppointment.time}
@@ -187,11 +327,14 @@ export function Home({
               </div>
             ) : (
               <div className="py-6 text-center space-y-2">
-                <p className="text-sm font-medium text-slate-600">
-                  {L('No appointments scheduled yet', 'कोई अपॉइंटमेंट निर्धारित नहीं है')}
+                <div className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-500 mb-1">
+                  <Calendar size={18} />
+                </div>
+                <p className="text-sm font-bold text-slate-900">
+                  {L('No upcoming appointments', 'कोई आगामी अपॉइंटमेंट नहीं')}
                 </p>
-                <p className="text-xs text-slate-400">
-                  {L('Schedule a consultation with a specialist for health review.', 'स्वास्थ्य समीक्षा के लिए विशेषज्ञ से परामर्श लें।')}
+                <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                  {L('Your booked appointments will appear here.', 'आपकी बुक की गई अपॉइंटमेंट यहाँ दिखाई देंगी।')}
                 </p>
               </div>
             )}
@@ -199,13 +342,19 @@ export function Home({
 
           <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between">
             <span className="text-xs text-slate-500">
-              {upcomingAppointment ? L('Reminder active on dashboard', 'रिमाइंडर सक्रिय है') : L('Certified doctors available', 'प्रमाणित डॉक्टर उपलब्ध')}
+              {upcomingAppointment
+                ? L('Reminder active on dashboard', 'रिमाइंडर सक्रिय है')
+                : L('Certified doctors available', 'प्रमाणित डॉक्टर उपलब्ध')}
             </span>
             <button
               onClick={() => go('appointments')}
               className="text-xs font-bold text-[#0f3057] hover:text-teal-700 flex items-center gap-1 cursor-pointer"
             >
-              <span>{upcomingAppointment ? L('View appointment →', 'अपॉइंटमेंट देखें →') : L('Book doctor →', 'डॉक्टर बुक करें →')}</span>
+              <span>
+                {upcomingAppointment
+                  ? L('View appointment →', 'अपॉइंटमेंट देखें →')
+                  : L('Book doctor →', 'डॉक्टर बुक करें →')}
+              </span>
             </button>
           </div>
         </Card>
@@ -222,71 +371,101 @@ export function Home({
                 onClick={() => go('medications')}
                 className="text-xs font-semibold text-teal-800 hover:underline cursor-pointer"
               >
-                {L('All medications (4) →', 'सभी दवाएँ (4) →')}
+                {medications.length > 0
+                  ? L(`All medications (${medications.length}) →`, `सभी दवाएँ (${medications.length}) →`)
+                  : L('View medications →', 'दवाएँ देखें →')}
               </button>
             </div>
 
-            <div className="space-y-3">
-              {medications.slice(0, 2).map((med) => (
-                <div
-                  key={med.id}
-                  className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-bold text-slate-900 truncate">{med.name} {med.dose}</p>
-                      {med.takenToday && (
-                        <span className="px-1.5 py-0.2 rounded bg-teal-100 text-teal-800 text-[10px] font-bold">
-                          {L('Taken', 'ली गई')}
-                        </span>
-                      )}
-                      {med.skippedToday && (
-                        <span className="px-1.5 py-0.2 rounded bg-slate-200 text-slate-700 text-[10px] font-medium">
-                          {L('Skipped', 'छोड़ी')}
-                        </span>
-                      )}
+            {medications.length > 0 ? (
+              <div className="space-y-3">
+                {medications.slice(0, 2).map((med) => (
+                  <div
+                    key={med.id}
+                    className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-bold text-slate-900 truncate">
+                          {med.name} {med.dose}
+                        </p>
+                        {med.takenToday && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 text-[10px] font-bold">
+                            <CheckCircle2 size={10} />
+                            <span>{L('Taken', 'ली गई')}</span>
+                          </span>
+                        )}
+                        {med.skippedToday && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] font-medium">
+                            <Clock size={10} />
+                            <span>{L('Skipped', 'छोड़ी')}</span>
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-600 mt-0.5">{med.instructions}</p>
+                      <p className="text-[11px] text-teal-800 font-semibold mt-1">
+                        {L('Next dose: ', 'अगली खुराक: ')}{med.nextDose}
+                      </p>
                     </div>
-                    <p className="text-xs text-slate-600 mt-0.5">{med.instructions}</p>
-                    <p className="text-[11px] text-teal-800 font-semibold mt-1">
-                      {L('Next dose: ', 'अगली खुराक: ')}{med.nextDose}
-                    </p>
-                  </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onMedicationStatusChange(med.id, 'taken')
-                        toast(`Marked ${med.name} as taken today! Good job following doctor instructions.`)
-                      }}
-                      className={cx(
-                        'px-2.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer',
-                        med.takenToday
-                          ? 'bg-teal-600 text-white'
-                          : 'bg-white border border-slate-200 text-slate-700 hover:bg-teal-50 hover:text-teal-800'
-                      )}
-                    >
-                      {L('Taken', 'ली गई')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onMedicationStatusChange(med.id, 'skip')
-                        toast(`Marked ${med.name} as skipped.`)
-                      }}
-                      className={cx(
-                        'px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer',
-                        med.skippedToday
-                          ? 'bg-slate-300 text-slate-800'
-                          : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-100'
-                      )}
-                    >
-                      {L('Skip', 'छोड़ें')}
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (med.takenToday) {
+                            onMedicationStatusChange(med.id, 'reset')
+                            toast(`Reset ${med.name} dose status`)
+                          } else {
+                            onMedicationStatusChange(med.id, 'taken')
+                            toast(`Marked ${med.name} as taken today! Good job following doctor instructions.`, 'ok')
+                          }
+                        }}
+                        className={cx(
+                          'px-2.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer',
+                          med.takenToday
+                            ? 'bg-teal-600 text-white'
+                            : 'bg-white border border-slate-200 text-slate-700 hover:bg-teal-50 hover:text-teal-800'
+                        )}
+                      >
+                        {med.takenToday ? L('Undo', 'वापस') : L('Taken', 'ली गई')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (med.skippedToday) {
+                            onMedicationStatusChange(med.id, 'reset')
+                            toast(`Reset ${med.name} dose status`)
+                          } else {
+                            onMedicationStatusChange(med.id, 'skip')
+                            toast(`Marked ${med.name} as skipped.`)
+                          }
+                        }}
+                        className={cx(
+                          'px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer',
+                          med.skippedToday
+                            ? 'bg-slate-300 text-slate-800'
+                            : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-100'
+                        )}
+                      >
+                        {L('Skip', 'छोड़ें')}
+                      </button>
+                    </div>
                   </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-6 text-center space-y-2">
+                <div className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-500 mb-1">
+                  <Pill size={18} />
                 </div>
-              ))}
-            </div>
+                <p className="text-sm font-bold text-slate-900">
+                  {L('No medications added yet', 'अभी तक कोई दवा नहीं जोड़ी गई')}
+                </p>
+                <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                  {L('Upload a prescription to start medication reminders.', 'दवा रिमाइंडर शुरू करने के लिए पर्चा अपलोड करें।')}
+                </p>
+              </div>
+            )}
           </div>
 
           <p className="mt-4 text-[11px] text-slate-600 italic border-t border-slate-100 pt-3">
@@ -303,7 +482,10 @@ export function Home({
               {L('My Health Conditions', 'मेरी स्वास्थ्य स्थितियाँ')}
             </h2>
             <p className="text-xs sm:text-sm text-slate-500">
-              {L('Key health areas tracked from your reports and consultations', 'आपकी रिपोर्ट और परामर्श से ट्रैक किए गए मुख्य स्वास्थ्य क्षेत्र')}
+              {L(
+                'Tracked from your verified health records and clinical consultations',
+                'आपके सत्यापित स्वास्थ्य रिकॉर्ड और क्लिनिकल परामर्श से ट्रैक किए गए क्षेत्र'
+              )}
             </p>
           </div>
           <button
@@ -314,91 +496,136 @@ export function Home({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {conditions.map((cond) => {
-            const isAttention = cond.status === 'attention'
-            const simpleDesc =
-              cond.simpleExplanation ||
-              (cond.id === 'diabetes'
-                ? 'Tracks your blood sugar levels.'
-                : cond.id === 'blood_pressure'
-                ? 'Tracks your blood pressure.'
-                : cond.id === 'heart'
-                ? 'Tracks heart rate and cholesterol.'
-                : 'Tracks kidney function.')
+        {conditions.length === 0 ? (
+          <Card className="p-8 text-center border-dashed border-slate-200">
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-teal-50 text-teal-700 mb-3">
+              <Activity size={24} />
+            </div>
+            <h3 className="font-display text-base font-bold text-slate-900">
+              {L('Your health profile is waiting for your first record.', 'आपकी स्वास्थ्य प्रोफ़ाइल आपके पहले रिकॉर्ड की प्रतीक्षा कर रही है।')}
+            </h3>
+            <p className="mt-1 text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
+              {L(
+                'Upload a report or prescription to start building your health timeline.',
+                'अपनी स्वास्थ्य टाइमलाइन शुरू करने के लिए रिपोर्ट या पर्चा अपलोड करें।'
+              )}
+            </p>
+            <div className="mt-4 flex justify-center">
+              <Btn sm onClick={() => go('documents')}>
+                <FileText size={14} />
+                <span>{L('Upload First Report', 'पहली रिपोर्ट अपलोड करें')}</span>
+              </Btn>
+            </div>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {conditions.map((cond) => {
+              const isAttention = cond.status === 'attention'
+              const simpleDesc =
+                cond.simpleExplanation ||
+                (cond.id === 'diabetes'
+                  ? 'Tracks your blood sugar levels.'
+                  : cond.id === 'blood_pressure'
+                  ? 'Tracks your blood pressure.'
+                  : cond.id === 'heart'
+                  ? 'Tracks heart rate and cholesterol.'
+                  : 'Tracks kidney function.')
 
-            const primaryLabel = cond.primaryMeasurementLabel || cond.keyMetrics[0]?.label || 'Latest reading'
-            const primaryVal = cond.primaryMeasurementValue || cond.keyMetrics[0]?.value || '—'
-            const primaryUnit = cond.primaryMeasurementUnit || cond.keyMetrics[0]?.unit || ''
-            const plainStatusText = cond.plainStatus || cond.statusLabel
+              const primaryLabel = cond.primaryMeasurementLabel || cond.keyMetrics[0]?.label || 'Latest reading'
+              const primaryVal = cond.primaryMeasurementValue || cond.keyMetrics[0]?.value || '—'
+              const primaryUnit = cond.primaryMeasurementUnit || cond.keyMetrics[0]?.unit || ''
+              const plainStatusText = cond.plainStatus || cond.statusLabel
 
-            return (
-              <Card
-                key={cond.id}
-                className="p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md border-slate-200 flex flex-col justify-between"
-              >
-                <div className="space-y-3">
-                  {/* 1. Condition Name */}
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-slate-50 border border-slate-200/60 shrink-0">
-                      {cond.id === 'diabetes' && <Droplets size={20} className="text-teal-600" />}
-                      {cond.id === 'blood_pressure' && <Activity size={20} className="text-sky-600" />}
-                      {cond.id === 'heart' && <Heart size={20} className="text-rose-600" />}
-                      {cond.id === 'kidney' && <FlaskConical size={20} className="text-violet-600" />}
-                    </span>
-                    <span
-                      className={cx(
-                        'px-2 py-0.5 rounded-full text-[10.5px] font-bold',
-                        isAttention
-                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                          : 'bg-teal-100 text-teal-900 border border-teal-200'
-                      )}
+              return (
+                <Card
+                  key={cond.id}
+                  className="p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md border-slate-200 flex flex-col justify-between"
+                >
+                  <div className="space-y-3">
+                    {/* 1. Condition Name & Accessible Status Badge */}
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="grid h-10 w-10 place-items-center rounded-xl bg-slate-50 border border-slate-200/60 shrink-0">
+                        {cond.id === 'diabetes' && <Droplets size={20} className="text-teal-600" />}
+                        {cond.id === 'blood_pressure' && <Activity size={20} className="text-sky-600" />}
+                        {cond.id === 'heart' && <Heart size={20} className="text-rose-600" />}
+                        {cond.id === 'kidney' && <FlaskConical size={20} className="text-violet-600" />}
+                      </span>
+                      <span
+                        className={cx(
+                          'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold',
+                          isAttention
+                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                            : 'bg-teal-100 text-teal-900 border border-teal-200'
+                        )}
+                      >
+                        {isAttention ? (
+                          <AlertCircle size={12} className="text-amber-700 shrink-0" />
+                        ) : (
+                          <CheckCircle2 size={12} className="text-teal-700 shrink-0" />
+                        )}
+                        <span>
+                          {isAttention
+                            ? L(`Needs attention · ${plainStatusText}`, `ध्यान दें · ${cond.plainStatusHi || plainStatusText}`)
+                            : L(`Normal · ${plainStatusText}`, `सामान्य · ${cond.plainStatusHi || plainStatusText}`)}
+                        </span>
+                      </span>
+                    </div>
+
+                    <div>
+                      <h3 className="font-display text-base font-bold text-slate-900 leading-snug">
+                        {L(cond.title, cond.titleHi)}
+                      </h3>
+                      {/* 2. Simple one-line explanation */}
+                      <p className="text-xs text-slate-600 mt-0.5 leading-snug">
+                        "{L(simpleDesc, cond.simpleExplanationHi || cond.subtitleHi)}"
+                      </p>
+                    </div>
+
+                    {/* 3. Most important current measurement - Grounded in records */}
+                    <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                          {primaryLabel}
+                        </p>
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          {L('From records', 'रिकॉर्ड से')}
+                        </span>
+                      </div>
+                      <p className="font-display text-xl font-bold text-slate-900 mt-0.5">
+                        {primaryVal} <span className="text-xs font-normal text-slate-500">{primaryUnit}</span>
+                      </p>
+                      <p className="mt-1 text-[10.5px] text-slate-500 flex items-center gap-1">
+                        <Info size={11} className="text-slate-400 shrink-0" />
+                        <span>
+                          {isAttention
+                            ? L('Outside lab reference interval', 'लैब संदर्भ सीमा से बाहर')
+                            : L('Within standard laboratory range', 'मानक लैब सीमा के भीतर')}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 5. Primary Actions */}
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                    <button
+                      onClick={() => go('chat', { prompt: `Tell me about my ${cond.title} readings.` })}
+                      className="font-semibold text-violet-800 hover:text-violet-950 flex items-center gap-1 cursor-pointer"
                     >
-                      {L(`Status: ${plainStatusText}`, `स्थिति: ${cond.plainStatusHi || cond.statusLabelHi}`)}
-                    </span>
+                      <Sparkles size={12} />
+                      <span>{L('Ask AI', 'AI से पूछें')}</span>
+                    </button>
+                    <button
+                      onClick={() => go('conditions', { conditionId: cond.id })}
+                      className="font-bold text-[#0f3057] hover:text-teal-700 flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <span>{L('View details →', 'विवरण देखें →')}</span>
+                    </button>
                   </div>
-
-                  <div>
-                    <h3 className="font-display text-base font-bold text-slate-900 leading-snug">
-                      {L(cond.title, cond.titleHi)}
-                    </h3>
-                    {/* 2. Simple one-line explanation */}
-                    <p className="text-xs text-slate-600 mt-0.5 leading-snug">
-                      "{L(simpleDesc, cond.simpleExplanationHi || cond.subtitleHi)}"
-                    </p>
-                  </div>
-
-                  {/* 3. Most important current measurement */}
-                  <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      {primaryLabel}
-                    </p>
-                    <p className="font-display text-xl font-bold text-slate-900 mt-0.5">
-                      {primaryVal} <span className="text-xs font-normal text-slate-500">{primaryUnit}</span>
-                    </p>
-                  </div>
-                </div>
-
-                {/* 5. Primary Actions */}
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                  <button
-                    onClick={() => go('chat', { prompt: `Tell me about my ${cond.title} readings.` })}
-                    className="font-semibold text-violet-800 hover:text-violet-950 flex items-center gap-1 cursor-pointer"
-                  >
-                    <Sparkles size={12} />
-                    <span>{L('Ask AI', 'AI से पूछें')}</span>
-                  </button>
-                  <button
-                    onClick={() => go('conditions', { conditionId: cond.id })}
-                    className="font-bold text-[#0f3057] hover:text-teal-700 flex items-center gap-0.5 cursor-pointer"
-                  >
-                    <span>{L('View details →', 'विवरण देखें →')}</span>
-                  </button>
-                </div>
-              </Card>
-            )
-          })}
-        </div>
+                </Card>
+              )
+            })}
+          </div>
+        )}
       </section>
 
       {/* SECTION 5: ASK HEALTHCOPILOT (Large Prominent Input Box) */}
@@ -485,40 +712,69 @@ export function Home({
           </button>
         </div>
 
-        <div className="space-y-3">
-          {[
-            { date: '07 OCT', type: 'Blood Test', title: 'CBC Report (Meridian Diagnostics)', note: '1 item needs attention · Hemoglobin 10.8 g/dL', s: 'attention' as StatusKey, icon: FlaskConical },
-            { date: '04 OCT', type: 'Prescription', title: 'Prescription (Dr. R. Menon)', note: '3 medications extracted & verified · 1 awaiting confirmation', s: 'verified' as StatusKey, icon: Pill },
-            { date: '28 SEP', type: 'Clinic Consultation', title: 'Doctor Visit (Sunrise Family Clinic)', note: 'Blood pressure 118/76 mmHg · Pulse 68 bpm recorded', s: 'neutral' as StatusKey, icon: Stethoscope },
-            { date: '12 SEP', type: 'Discharge Summary', title: 'Hospital Visit (City General Hospital)', note: 'Discharged in stable condition · Normal vital indicators', s: 'neutral' as StatusKey, icon: Hospital },
-          ].map((act, i) => (
-            <Card key={act.title} className="flex flex-wrap items-center gap-x-5 gap-y-2 p-4 transition-all hover:shadow-md">
-              <span className="font-display text-sm font-bold text-slate-800 w-16 shrink-0">{act.date}</span>
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-50 text-slate-700">
-                <act.icon size={18} />
-              </span>
-              <div className="min-w-[160px] flex-1">
-                <Eyebrow className="text-[10.5px]">{act.type}</Eyebrow>
-                <p className="font-bold text-sm text-slate-900">{act.title}</p>
-                <p className="text-xs text-slate-500">{act.note}</p>
-              </div>
-              <Badge s={act.s} />
-              <Btn sm v="secondary" onClick={() => (i === 0 ? go('summary') : go('timeline'))}>
-                {L('View', 'देखें')}
+        {displayActivities.length === 0 ? (
+          <Card className="p-8 text-center border-dashed border-slate-200">
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-500 mb-3">
+              <FolderOpen size={22} />
+            </div>
+            <h3 className="font-display text-base font-bold text-slate-900">
+              {L('No health activity yet.', 'अभी तक कोई स्वास्थ्य गतिविधि नहीं है।')}
+            </h3>
+            <p className="mt-1 text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
+              {L(
+                'Activity will appear after you upload or add health information, doctor visits, or prescriptions.',
+                'जब आप स्वास्थ्य जानकारी, डॉक्टर परामर्श या पर्चा अपलोड करेंगे, तब गतिविधियाँ यहाँ दिखाई देंगी।'
+              )}
+            </p>
+            <div className="mt-4 flex justify-center">
+              <Btn sm onClick={() => go('documents')}>
+                <FileText size={14} />
+                <span>{L('Upload First Document', 'पहला दस्तावेज़ अपलोड करें')}</span>
               </Btn>
-            </Card>
-          ))}
-        </div>
+            </div>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {displayActivities.map((act) => (
+              <Card key={act.title} className="flex flex-wrap items-center gap-x-5 gap-y-2 p-4 transition-all hover:shadow-md">
+                <span className="font-display text-sm font-bold text-slate-800 w-16 shrink-0">{act.date}</span>
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-50 text-slate-700">
+                  <act.icon size={18} />
+                </span>
+                <div className="min-w-[160px] flex-1">
+                  <Eyebrow className="text-[10.5px]">{act.type}</Eyebrow>
+                  <p className="font-bold text-sm text-slate-900">{act.title}</p>
+                  <p className="text-xs text-slate-500">{act.note}</p>
+                </div>
+                <Badge s={act.s} />
+                <Btn sm v="secondary" onClick={() => (act.type === 'Blood Test' ? go('summary') : go('timeline'))}>
+                  {act.type === 'Blood Test' ? L('View report', 'रिपोर्ट देखें') : L('View details', 'विवरण देखें')}
+                </Btn>
+              </Card>
+            ))}
+          </div>
+        )}
       </section>
 
-      {/* SECTION 7: DETAILED HEALTH EVIDENCE PIPELINE (Placed lower on dashboard) */}
+      {/* SECTION 7: DETAILED HEALTH EVIDENCE PIPELINE */}
       <Card className="overflow-hidden p-6 md:p-8 border-slate-200">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-2">
           <div>
-            <Eyebrow>{L('Health Data Integrity', 'स्वास्थ्य डेटा विश्वसनीयता')}</Eyebrow>
+            <div className="flex items-center gap-2 mb-1">
+              <Eyebrow>{L('Health Data Integrity', 'स्वास्थ्य डेटा विश्वसनीयता')}</Eyebrow>
+              <span className="px-2 py-0.2 rounded-full bg-teal-50 text-teal-800 border border-teal-200 text-[10px] font-bold">
+                {L('100% Traceable', '100% सत्यापन योग्य')}
+              </span>
+            </div>
             <h2 className="mt-1 font-display text-xl font-bold tracking-tight text-slate-900">
-              {L('Every value traces back to your uploaded document', 'हर मान आपके अपलोड किए गए दस्तावेज़ से जुड़ा है')}
+              {L('Where did this health value come from?', 'यह स्वास्थ्य मान कहाँ से आया?')}
             </h2>
+            <p className="mt-1 text-xs sm:text-sm text-slate-600">
+              {L(
+                'Every value in your profile traces directly back to your original uploaded medical documents.',
+                'आपकी प्रोफ़ाइल का हर मान सीधे आपके मूल अपलोड किए गए मेडिकल दस्तावेज़ों से जुड़ा है।'
+              )}
+            </p>
           </div>
           <button onClick={() => ev({ kind: 'cbc', region: 'hb' })} className="text-xs font-bold text-sky-800 hover:underline cursor-pointer">
             {L('Open document evidence →', 'दस्तावेज़ साक्ष्य खोलें →')}
@@ -527,39 +783,68 @@ export function Home({
 
         <div className="grid items-stretch gap-3 md:grid-cols-[1.1fr_auto_1fr_auto_1fr_auto_1fr]">
           {[
-            { n: '1 · Document', body: (
-              <div className="relative h-24 overflow-hidden rounded-lg ring-1 ring-slate-200">
-                <div className="absolute left-0 top-0 w-[220%]" style={{ transform: 'translate(-12%, -34%)' }}>
-                  <DocPaper kind="cbc" active="hb" tint={{ hb: 'verified' }} showAll={false} />
+            {
+              n: L('1 · Original Document', '1 · मूल दस्तावेज़'),
+              sub: L('Uploaded paper scan', 'अपलोड किया गया स्कैन'),
+              body: (
+                <div className="relative h-24 overflow-hidden rounded-lg ring-1 ring-slate-200">
+                  <div className="absolute left-0 top-0 w-[220%]" style={{ transform: 'translate(-12%, -34%)' }}>
+                    <DocPaper kind="cbc" active="hb" tint={{ hb: 'verified' }} showAll={false} />
+                  </div>
                 </div>
-              </div>) },
-            { n: '2 · Extraction', body: (
-              <div className="grid h-24 content-center rounded-lg bg-slate-50 px-4">
-                <p className="text-xs text-slate-500">Hemoglobin</p>
-                <p className="font-display text-2xl font-bold text-slate-900">10.8 <span className="text-sm font-normal text-slate-500">g/dL</span></p>
-              </div>) },
-            { n: '3 · Confidence', body: (
-              <div className="flex h-24 items-center gap-3 rounded-lg bg-slate-50 px-4">
-                <ConfRing value={97} size={52} />
-                <div>
-                  <Badge s="verified" />
-                  <p className="mt-1 text-[11px] text-slate-500">{L('High confidence', 'उच्च सटीकता')}</p>
+              ),
+            },
+            {
+              n: L('2 · Extracted Reading', '2 · पहचाना गया मान'),
+              sub: L('OCR parameter matching', 'ओसीआर मिलान'),
+              body: (
+                <div className="grid h-24 content-center rounded-lg bg-slate-50 px-4">
+                  <p className="text-xs text-slate-500 font-semibold">Hemoglobin</p>
+                  <p className="font-display text-2xl font-bold text-slate-900">
+                    10.8 <span className="text-sm font-normal text-slate-500">g/dL</span>
+                  </p>
+                  <p className="text-[10px] text-amber-700 font-medium">{L('Ref: 12.0 – 15.5 g/dL', 'सीमा: 12.0 – 15.5 g/dL')}</p>
                 </div>
-              </div>) },
-            { n: '4 · Verified Data', body: (
-              <div className="grid h-24 content-center rounded-lg bg-teal-50/70 px-4 ring-1 ring-teal-100">
-                <p className="flex items-center gap-1.5 text-sm font-bold text-teal-800">
-                  <ShieldCheck size={15} />{L('Added to Record', 'रिकॉर्ड में शामिल')}
-                </p>
-                <p className="mt-0.5 text-xs text-teal-700/80">Observation · 07 Oct 2026</p>
-              </div>) },
+              ),
+            },
+            {
+              n: L('3 · AI Confidence', '3 · सटीकता स्कोर'),
+              sub: L('Validated against scan', 'स्कैन से पुष्टि'),
+              body: (
+                <div className="flex h-24 items-center gap-3 rounded-lg bg-slate-50 px-4">
+                  <ConfRing value={97} size={52} />
+                  <div>
+                    <Badge s="verified" />
+                    <p className="mt-1 text-[11px] text-slate-500">{L('97% high confidence', '97% उच्च सटीकता')}</p>
+                  </div>
+                </div>
+              ),
+            },
+            {
+              n: L('4 · Verified Record', '4 · सत्यापित रिकॉर्ड'),
+              sub: L('Stored in Health Profile', 'प्रोफ़ाइल में सुरक्षित'),
+              body: (
+                <div className="grid h-24 content-center rounded-lg bg-teal-50/70 px-4 ring-1 ring-teal-100">
+                  <p className="flex items-center gap-1.5 text-sm font-bold text-teal-800">
+                    <ShieldCheck size={15} />
+                    {L('Added to Record', 'रिकॉर्ड में शामिल')}
+                  </p>
+                  <p className="mt-0.5 text-xs text-teal-700/80">Observation · 07 Oct 2026</p>
+                </div>
+              ),
+            },
           ].map((s, i, a) => (
             <div key={s.n} className="contents">
               <div>
-                <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">{s.n}</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-700">{s.n}</p>
+                <p className="mb-2 text-[10px] text-slate-400">{s.sub}</p>
                 {s.body}
               </div>
-              {i < a.length - 1 && <div className="hidden items-center md:flex"><ArrowRight size={16} className="mt-5 text-slate-300" /></div>}
+              {i < a.length - 1 && (
+                <div className="hidden items-center md:flex">
+                  <ArrowRight size={16} className="mt-7 text-slate-300" />
+                </div>
+              )}
             </div>
           ))}
         </div>

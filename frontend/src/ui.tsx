@@ -229,3 +229,70 @@ export function DocPaper({ kind, active, tint = {}, onPick, showAll = true }: { 
     </div>
   )
 }
+
+/**
+ * Calculates dynamic appointment date label based on current system date.
+ * Prevents impossible combinations like "Tomorrow · 8 Oct" when current date is already 8 Oct.
+ */
+export function formatAppointmentDate(rawDateStr: string, currentDate = new Date()): string {
+  if (!rawDateStr) return ''
+
+  const monthMap: Record<string, number> = {
+    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+  }
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const weekdayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+  const str = rawDateStr.trim()
+
+  let targetDay: number | null = null
+  let targetMonth: number | null = null
+  let targetYear: number = currentDate.getFullYear()
+
+  // Match ISO YYYY-MM-DD
+  const isoMatch = str.match(/(\d{4})-(\d{2})-(\d{2})/)
+  if (isoMatch) {
+    targetYear = parseInt(isoMatch[1], 10)
+    targetMonth = parseInt(isoMatch[2], 10) - 1
+    targetDay = parseInt(isoMatch[3], 10)
+  } else {
+    // Match day number and month name (e.g. "8 Oct", "08 Oct 2026", "Oct 8")
+    const dayMonthMatch = str.match(/(\d{1,2})\s+([A-Za-z]{3,9})/i) || str.match(/([A-Za-z]{3,9})\s+(\d{1,2})/i)
+    if (dayMonthMatch) {
+      const isFirstNum = /^\d+$/.test(dayMonthMatch[1])
+      const dayVal = parseInt(isFirstNum ? dayMonthMatch[1] : dayMonthMatch[2], 10)
+      const monthVal = (isFirstNum ? dayMonthMatch[2] : dayMonthMatch[1]).toLowerCase().slice(0, 3)
+
+      if (monthMap[monthVal] !== undefined && !isNaN(dayVal)) {
+        targetDay = dayVal
+        targetMonth = monthMap[monthVal]
+      }
+    }
+  }
+
+  if (targetDay === null || targetMonth === null) {
+    return str
+  }
+
+  const targetMidnight = new Date(targetYear, targetMonth, targetDay, 0, 0, 0)
+  const currentMidnight = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), 0, 0, 0)
+
+  const diffMs = targetMidnight.getTime() - currentMidnight.getTime()
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24))
+
+  const formattedDate = `${targetDay} ${monthNames[targetMonth]}`
+  const weekday = weekdayNames[targetMidnight.getDay()]
+
+  if (diffDays === 0) {
+    return `Today · ${formattedDate}`
+  } else if (diffDays === 1) {
+    return `Tomorrow · ${formattedDate}`
+  } else if (diffDays === -1) {
+    return `Yesterday · ${formattedDate}`
+  } else if (diffDays > 1 && diffDays < 7) {
+    return `${weekday} · ${formattedDate}`
+  } else {
+    return `${weekday}, ${formattedDate}`
+  }
+}

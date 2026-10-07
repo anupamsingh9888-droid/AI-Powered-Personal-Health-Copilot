@@ -1,5 +1,8 @@
 {
   "name": "HealthLens",
   "description": "Empower your health management with an AI-driven platform that organizes medical documents, simplifies reports, and visualizes your health journey.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

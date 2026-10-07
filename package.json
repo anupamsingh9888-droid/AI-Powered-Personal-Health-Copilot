@@ -11,6 +11,6 @@
     "build": "npm run build --workspace=frontend && cp -r dist frontend/dist",
     "start": "node server.ts",
     "preview": "npm run preview --workspace=frontend",
-    "lint": "tsc --noEmit -p frontend/tsconfig.json"
+    "lint": "npm run lint --workspace=frontend"
   }
 }

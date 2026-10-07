@@ -1,0 +1,10 @@
+{
+  "description": "Empower your health management with an AI-driven platform that organizes medical documents, simplifies reports, and visualizes your health journey.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

@@ -1,6 +1,7 @@
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
+import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -9,14 +10,39 @@ const __dirname = path.dirname(__filename)
 const PORT = parseInt(process.env.PORT || '3000', 10)
 const HOST = '0.0.0.0'
 
-// Detect dist directory
-let DIST_DIR = path.join(__dirname, 'dist')
-if (!fs.existsSync(DIST_DIR) || !fs.existsSync(path.join(DIST_DIR, 'index.html'))) {
-  const altDist = path.join(__dirname, 'frontend', 'dist')
-  if (fs.existsSync(altDist) && fs.existsSync(path.join(altDist, 'index.html'))) {
-    DIST_DIR = altDist
+function getDistDir(): string {
+  const candidates = [
+    path.join(__dirname, 'dist'),
+    path.join(__dirname, 'frontend', 'dist'),
+    path.join(process.cwd(), 'dist'),
+    path.join(process.cwd(), 'frontend', 'dist'),
+  ]
+
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(c, 'index.html'))) {
+      return c
+    }
   }
+
+  // If dist doesn't exist, trigger build synchronously so container boots up properly
+  console.log('[HealthLens Server] dist/index.html not found, executing build...')
+  try {
+    execSync('npm run build', { stdio: 'inherit' })
+  } catch (err) {
+    console.error('[HealthLens Server] Build failed:', err)
+  }
+
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(c, 'index.html'))) {
+      return c
+    }
+  }
+
+  return path.join(__dirname, 'dist')
 }
+
+let DIST_DIR = getDistDir()
+console.log(`[HealthLens Server] Resolved DIST_DIR: ${DIST_DIR}`)
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import {
   Bell,
   CircleHelp,
@@ -20,6 +20,9 @@ import {
   Calendar,
   X,
   ArrowRight,
+  ArrowLeft,
+  AlertCircle,
+  CheckCircle2,
   ShieldCheck,
   Stethoscope,
 } from 'lucide-react'
@@ -39,6 +42,83 @@ import {
   INITIAL_ALERTS,
 } from './data/healthData'
 import type { ConditionInfo, Appointment, MedicationItem, HealthAlert, HealthConditionId } from './types'
+
+export interface HealthNotification {
+  id: string
+  title: string
+  titleHi: string
+  message: string
+  messageHi: string
+  timeAgo: string
+  timeAgoHi: string
+  type: 'medication' | 'appointment' | 'alert' | 'verification' | 'document'
+  targetView: string
+  extra?: any
+  read: boolean
+}
+
+export const INITIAL_NOTIFICATIONS: HealthNotification[] = [
+  {
+    id: 'notif-med-1',
+    title: 'Medication reminder',
+    titleHi: 'दवा रिमाइंडर',
+    message: 'Amoxicillin 500 mg dose due at 2:00 PM.',
+    messageHi: 'एमोक्सिसिलिन 500 mg खुराक दोपहर 2:00 बजे लेनी है।',
+    timeAgo: '15m ago',
+    timeAgoHi: '15 मिनट पहले',
+    type: 'medication',
+    targetView: 'medications',
+    read: false,
+  },
+  {
+    id: 'notif-apt-1',
+    title: 'Appointment reminder',
+    titleHi: 'अपॉइंटमेंट रिमाइंडर',
+    message: 'Appointment with Dr. R. Menon tomorrow at 10:30 AM.',
+    messageHi: 'डॉ. आर. मेनन के साथ कल सुबह 10:30 बजे अपॉइंटमेंट है।',
+    timeAgo: '1h ago',
+    timeAgoHi: '1 घंटा पहले',
+    type: 'appointment',
+    targetView: 'appointments',
+    read: false,
+  },
+  {
+    id: 'notif-alert-1',
+    title: 'Health alert',
+    titleHi: 'स्वास्थ्य चेतावनी',
+    message: 'Hemoglobin 10.8 g/dL is below the reference range.',
+    messageHi: 'हीमोग्लोबिन 10.8 g/dL संदर्भ सीमा से कम है।',
+    timeAgo: '3h ago',
+    timeAgoHi: '3 घंटे पहले',
+    type: 'alert',
+    targetView: 'summary',
+    read: false,
+  },
+  {
+    id: 'notif-verify-1',
+    title: 'Medication verification',
+    titleHi: 'दवा सत्यापन',
+    message: 'Medicine extracted from the 04 Oct prescription needs confirmation.',
+    messageHi: '04 अक्टूबर के पर्चे से निकाली गई दवा की पुष्टि आवश्यक है।',
+    timeAgo: '1d ago',
+    timeAgoHi: '1 दिन पहले',
+    type: 'verification',
+    targetView: 'medications',
+    read: false,
+  },
+  {
+    id: 'notif-doc-1',
+    title: 'Document update',
+    titleHi: 'दस्तावेज़ अपडेट',
+    message: 'CBC report successfully processed and added to your health record.',
+    messageHi: 'CBC रिपोर्ट सफलतापूर्वक संसाधित की गई और आपके स्वास्थ्य रिकॉर्ड में जोड़ी गई।',
+    timeAgo: '2d ago',
+    timeAgoHi: '2 दिन पहले',
+    type: 'document',
+    targetView: 'summary',
+    read: true,
+  },
+]
 
 const nav = [
   { id: 'home', en: 'Dashboard', hi: 'डैशबोर्ड', i: House },
@@ -73,6 +153,15 @@ export default function App() {
   const [medications, setMedications] = useState<MedicationItem[]>(INITIAL_MEDICATIONS)
   const [alerts, setAlerts] = useState<HealthAlert[]>(INITIAL_ALERTS)
   const [chatInitialPrompt, setChatInitialPrompt] = useState<string>('')
+  const [appointmentsSpecialtyFilter, setAppointmentsSpecialtyFilter] = useState<string>('All')
+
+  // Notifications & Back Navigation state
+  const [notifications, setNotifications] = useState<HealthNotification[]>(INITIAL_NOTIFICATIONS)
+  const [notifOpen, setNotifOpen] = useState(false)
+  const [fromDashboard, setFromDashboard] = useState(false)
+  const bellRef = useRef<HTMLDivElement>(null)
+
+  const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications])
 
   // Global Header Search
   const [searchQuery, setSearchQuery] = useState('')
@@ -189,7 +278,7 @@ export default function App() {
       id: `apt-${Date.now()}`,
       ...aptData,
     }
-    setAppointments((prev) => [newApt, ...prev])
+    setAppointments((prev) => [newApt, ...prev.filter((a) => a.id !== newApt.id)])
     // Update dashboard alert
     setAlerts((prev) => [
       {
@@ -204,20 +293,77 @@ export default function App() {
       },
       ...prev.filter((a) => a.type !== 'appointment'),
     ])
+    // Sync notification: appointment reminders only appear when appointment exists (Requirement 11)
+    if (newApt.hasReminder) {
+      setNotifications((prev) => [
+        {
+          id: `notif-apt-${newApt.id}`,
+          title: 'Appointment reminder',
+          titleHi: 'अपॉइंटमेंट रिमाइंडर',
+          message: `Appointment with ${newApt.doctorName} on ${newApt.date} at ${newApt.time}.`,
+          messageHi: `${newApt.doctorName} के साथ ${newApt.date} को ${newApt.time} पर अपॉइंटमेंट है।`,
+          timeAgo: 'Just now',
+          timeAgoHi: 'अभी-अभी',
+          type: 'appointment',
+          targetView: 'appointments',
+          read: false,
+        },
+        ...prev.filter((n) => n.type !== 'appointment'),
+      ])
+    }
   }
 
   const handleCancelAppointment = (id: string) => {
-    setAppointments((prev) => prev.filter((a) => a.id !== id))
+    setAppointments((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: 'cancelled' as const, hasReminder: false } : a))
+    )
     setAlerts((prev) => prev.filter((a) => a.type !== 'appointment'))
+    // Remove appointment notification if no active appointment remains (Requirement 11)
+    setNotifications((prev) => prev.filter((n) => n.type !== 'appointment'))
     setToast({ msg: 'Appointment cancelled.', tone: 'ok', k: Date.now() })
   }
 
   const handleToggleReminder = (id: string) => {
     setAppointments((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, hasReminder: !a.hasReminder } : a))
+      prev.map((a) => {
+        if (a.id === id) {
+          const nextReminder = !a.hasReminder
+          if (!nextReminder) {
+            setNotifications((nPrev) => nPrev.filter((n) => n.type !== 'appointment'))
+          } else {
+            setNotifications((nPrev) => [
+              {
+                id: `notif-apt-${a.id}`,
+                title: 'Appointment reminder',
+                titleHi: 'अपॉइंटमेंट रिमाइंडर',
+                message: `Appointment with ${a.doctorName} on ${a.date} at ${a.time}.`,
+                messageHi: `${a.doctorName} के साथ ${a.date} को ${a.time} पर अपॉइंटमेंट है।`,
+                timeAgo: 'Just now',
+                timeAgoHi: 'अभी-अभी',
+                type: 'appointment',
+                targetView: 'appointments',
+                read: false,
+              },
+              ...nPrev.filter((n) => n.type !== 'appointment'),
+            ])
+          }
+          return { ...a, hasReminder: nextReminder }
+        }
+        return a
+      })
     )
     setToast({ msg: 'Reminder preferences updated.', tone: 'ok', k: Date.now() })
   }
+
+  // Ensure appointment reminders appear only when an appointment actually exists (Requirement 11)
+  useEffect(() => {
+    const hasActiveReminderApt = appointments.some(
+      (a) => (a.status === 'confirmed' || a.status === 'requested') && a.hasReminder
+    )
+    if (!hasActiveReminderApt) {
+      setNotifications((prev) => prev.filter((n) => n.type !== 'appointment'))
+    }
+  }, [appointments])
 
   // Route to AI chat with a pre-loaded question
   const handleAskAiWithPrompt = (prompt: string) => {
@@ -225,8 +371,11 @@ export default function App() {
     setView('chat')
   }
 
-  // Route to Doctor consultation with pre-filtered specialty
+  // Route to Doctor consultation with pre-filtered specialty (Requirement 12)
   const handleBookDoctorWithSpecialty = (specialty?: string) => {
+    if (specialty) {
+      setAppointmentsSpecialtyFilter(specialty)
+    }
     setView('appointments')
   }
 
@@ -306,6 +455,41 @@ export default function App() {
     }
   }
 
+  // Navigation originating from the Dashboard sets fromDashboard flag
+  const handleDashboardGo = (viewId: string, extra?: any) => {
+    setFromDashboard(true)
+    navigateTo(viewId, extra)
+  }
+
+  // Handle clicking a notification in Notification Center
+  const handleNotificationClick = (notif: HealthNotification) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === notif.id ? { ...n, read: true } : n))
+    )
+    setNotifOpen(false)
+    setFromDashboard(true)
+    navigateTo(notif.targetView, notif.extra)
+  }
+
+  // Click outside and escape key handling for notification dropdown
+  useEffect(() => {
+    if (!notifOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) {
+        setNotifOpen(false)
+      }
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNotifOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [notifOpen])
+
   // If user is logged out or requested login view
   if (!user || showLoginModal) {
     return (
@@ -334,7 +518,7 @@ export default function App() {
   const pages: Record<string, React.ReactNode> = {
     home: (
       <Home
-        go={navigateTo}
+        go={handleDashboardGo}
         user={user}
         conditions={conditions}
         appointments={appointments}
@@ -348,6 +532,8 @@ export default function App() {
       <HealthChat
         userName={user?.name ? user.name.split(' ')[0] : 'Alex'}
         initialPrompt={chatInitialPrompt}
+        onNavigate={handleDashboardGo}
+        hasRecords={user?.hasRecords ?? (user?.email === 'alex.rao@email.com' || user?.email === 'priya.sharma@health.org')}
       />
     ),
     conditions: (
@@ -357,6 +543,8 @@ export default function App() {
         onSelectCondition={setSelectedConditionId}
         onAskAi={handleAskAiWithPrompt}
         onBookDoctor={handleBookDoctorWithSpecialty}
+        hasRecords={user?.hasRecords ?? (user?.email === 'alex.rao@email.com' || user?.email === 'priya.sharma@health.org')}
+        onNavigate={handleDashboardGo}
       />
     ),
     appointments: (
@@ -366,6 +554,7 @@ export default function App() {
         onBookAppointment={handleBookAppointment}
         onCancelAppointment={handleCancelAppointment}
         onToggleReminder={handleToggleReminder}
+        initialSpecialtyFilter={appointmentsSpecialtyFilter}
       />
     ),
     timeline: (
@@ -419,7 +608,10 @@ export default function App() {
                   return (
                     <button
                       key={n.id}
-                      onClick={() => navigateTo(n.id)}
+                      onClick={() => {
+                        setFromDashboard(false)
+                        navigateTo(n.id)
+                      }}
                       className={cx(
                         'group flex h-11 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-medium transition-all cursor-pointer',
                         on
@@ -545,6 +737,7 @@ export default function App() {
                           <button
                             key={i}
                             onClick={() => {
+                              setFromDashboard(true)
                               if (res.targetView === 'conditions' && res.extra) {
                                 setSelectedConditionId(res.extra)
                               }
@@ -586,23 +779,203 @@ export default function App() {
                   ))}
                 </div>
 
-                {/* Notifications Bell */}
-                <button
-                  onClick={() => {
-                    setToast({
-                      msg: `You have ${alerts.length} health alerts and reminders.`,
-                      tone: 'ok',
-                      k: Date.now(),
-                    })
-                  }}
-                  className="relative grid h-10 w-10 place-items-center rounded-xl text-slate-600 hover:bg-slate-100 cursor-pointer"
-                  aria-label="Notifications"
-                >
-                  <Bell size={18} strokeWidth={1.7} />
-                  {alerts.length > 0 && (
-                    <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-background" />
+                {/* Notifications Bell & Dropdown */}
+                <div className="relative" ref={bellRef}>
+                  <button
+                    onClick={() => setNotifOpen((prev) => !prev)}
+                    className={cx(
+                      'relative grid h-10 w-10 place-items-center rounded-xl transition cursor-pointer',
+                      notifOpen ? 'bg-slate-100 text-teal-800' : 'text-slate-600 hover:bg-slate-100'
+                    )}
+                    aria-label="Notifications"
+                    aria-expanded={notifOpen}
+                    title={unreadCount > 0 ? `${unreadCount} unread notifications` : 'Notifications'}
+                  >
+                    <Bell size={18} strokeWidth={1.7} />
+                    {unreadCount > 0 && (
+                      <span className="absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white shadow-xs">
+                        {unreadCount}
+                      </span>
+                    )}
+                  </button>
+
+                  {notifOpen && (
+                    <div className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] sm:w-96 rounded-2xl border border-slate-200/90 bg-white shadow-2xl z-50 overflow-hidden anim-fade-up">
+                      {/* Panel Header */}
+                      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 bg-slate-50/70">
+                        <div className="flex items-center gap-2">
+                          <span className="font-display text-sm font-bold text-slate-900">
+                            {lang === 'hi' ? 'सूचनाएं' : 'Notifications'}
+                          </span>
+                          {unreadCount > 0 && (
+                            <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[10.5px] font-bold text-teal-800 border border-teal-200">
+                              {unreadCount} {lang === 'hi' ? 'नई' : 'new'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {unreadCount > 0 && (
+                            <button
+                              onClick={() => {
+                                setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
+                                setToast({ msg: 'All notifications marked as read', tone: 'ok', k: Date.now() })
+                              }}
+                              className="text-[11.5px] font-semibold text-teal-700 hover:text-teal-900 hover:underline cursor-pointer"
+                            >
+                              {lang === 'hi' ? 'सभी को पढ़ा हुआ चिह्नित करें' : 'Mark all as read'}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setNotifOpen(false)}
+                            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 cursor-pointer"
+                            aria-label="Close notifications"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Notifications List */}
+                      <div className="max-h-96 overflow-y-auto divide-y divide-slate-100">
+                        {notifications.length === 0 ? (
+                          <div className="py-10 px-4 text-center space-y-2">
+                            <div className="mx-auto grid h-10 w-10 place-items-center rounded-full bg-teal-50 text-teal-600 mb-1">
+                              <CheckCircle2 size={20} />
+                            </div>
+                            <p className="text-sm font-bold text-slate-900">
+                              {lang === 'hi' ? 'सब कुछ अद्यतित है।' : "You're all caught up."}
+                            </p>
+                            <p className="text-xs text-slate-500 max-w-[200px] mx-auto">
+                              {lang === 'hi' ? 'वर्तमान में कोई नई सूचना नहीं है।' : 'No new reminders or health updates right now.'}
+                            </p>
+                          </div>
+                        ) : (
+                          notifications.map((n) => {
+                            const isUnread = !n.read
+                            const IconComponent =
+                              n.type === 'medication'
+                                ? Pill
+                                : n.type === 'appointment'
+                                ? Calendar
+                                : n.type === 'alert'
+                                ? AlertCircle
+                                : n.type === 'verification'
+                                ? ShieldCheck
+                                : FileText
+
+                            const iconColors =
+                              n.type === 'medication'
+                                ? 'bg-teal-50 text-teal-700 border-teal-200'
+                                : n.type === 'appointment'
+                                ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                : n.type === 'alert'
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : n.type === 'verification'
+                                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+
+                            return (
+                              <div
+                                key={n.id}
+                                onClick={() => handleNotificationClick(n)}
+                                className={cx(
+                                  'group flex items-start gap-3 p-3.5 transition cursor-pointer hover:bg-slate-50 relative',
+                                  isUnread ? 'bg-sky-50/25' : 'bg-white'
+                                )}
+                              >
+                                {/* Type Icon */}
+                                <div
+                                  className={cx(
+                                    'grid h-9 w-9 shrink-0 place-items-center rounded-xl border',
+                                    iconColors
+                                  )}
+                                >
+                                  <IconComponent size={16} />
+                                </div>
+
+                                {/* Content */}
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5 mb-0.5">
+                                    <span
+                                      className={cx(
+                                        'text-[11px] font-bold uppercase tracking-wider',
+                                        isUnread ? 'text-slate-900' : 'text-slate-500'
+                                      )}
+                                    >
+                                      {lang === 'hi' ? n.titleHi : n.title}
+                                    </span>
+                                    {isUnread && (
+                                      <span className="h-1.5 w-1.5 rounded-full bg-teal-600 shrink-0" />
+                                    )}
+                                    <span className="ml-auto text-[10.5px] text-slate-400 shrink-0">
+                                      {lang === 'hi' ? n.timeAgoHi : n.timeAgo}
+                                    </span>
+                                  </div>
+                                  <p
+                                    className={cx(
+                                      'text-xs leading-relaxed',
+                                      isUnread ? 'font-semibold text-slate-900' : 'text-slate-600'
+                                    )}
+                                  >
+                                    {lang === 'hi' ? n.messageHi : n.message}
+                                  </p>
+                                </div>
+
+                                {/* Actions: Mark read / Dismiss */}
+                                <div className="flex items-center gap-1 shrink-0 ml-1 opacity-80 group-hover:opacity-100">
+                                  {isUnread && (
+                                    <button
+                                      type="button"
+                                      title={lang === 'hi' ? 'पढ़ा हुआ चिह्नित करें' : 'Mark as read'}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        setNotifications((prev) =>
+                                          prev.map((item) => (item.id === n.id ? { ...item, read: true } : item))
+                                        )
+                                      }}
+                                      className="p-1 rounded-lg text-slate-400 hover:text-teal-700 hover:bg-teal-50 cursor-pointer"
+                                    >
+                                      <Check size={13} strokeWidth={2.5} />
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    title={lang === 'hi' ? 'हटाएँ' : 'Dismiss notification'}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setNotifications((prev) => prev.filter((item) => item.id !== n.id))
+                                    }}
+                                    className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                                  >
+                                    <X size={13} />
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })
+                        )}
+                      </div>
+
+                      {/* Panel Footer */}
+                      {notifications.length > 0 && (
+                        <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2.5 bg-slate-50/50 text-xs">
+                          <span className="text-[11px] text-slate-400">
+                            {notifications.length} {lang === 'hi' ? 'सूचनाएं' : 'notifications'}
+                          </span>
+                          <button
+                            onClick={() => {
+                              setNotifications([])
+                              setToast({ msg: 'All notifications dismissed', tone: 'ok', k: Date.now() })
+                            }}
+                            className="text-[11px] font-semibold text-slate-500 hover:text-rose-600 cursor-pointer"
+                          >
+                            {lang === 'hi' ? 'सभी हटाएं' : 'Clear all'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
-                </button>
+                </div>
 
                 {/* User avatar indicator */}
                 <button
@@ -615,7 +988,25 @@ export default function App() {
               </header>
 
               {/* Main Content Area */}
-              <main className="px-4 pb-28 pt-7 md:px-8 md:pt-9 lg:pb-16">{pages[view]}</main>
+              <main className="px-4 pb-28 pt-7 md:px-8 md:pt-9 lg:pb-16">
+                {/* Back to Dashboard Navigation Button */}
+                {((fromDashboard && view !== 'home') || view === 'summary') && (
+                  <div className={cx('mb-5 mx-auto', view === 'summary' ? 'max-w-3xl' : 'max-w-5xl')}>
+                    <button
+                      onClick={() => {
+                        setFromDashboard(false)
+                        setSelectedConditionId(null)
+                        setView('home')
+                      }}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200/90 bg-white px-3.5 py-2 text-xs sm:text-sm font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 hover:text-slate-900 transition cursor-pointer"
+                    >
+                      <ArrowLeft size={16} className="text-teal-700" />
+                      <span>{lang === 'hi' ? '← डैशबोर्ड पर वापस जाएँ' : '← Back to Dashboard'}</span>
+                    </button>
+                  </div>
+                )}
+                {pages[view]}
+              </main>
             </div>
 
             {/* Mobile Bottom Navigation */}
@@ -625,7 +1016,10 @@ export default function App() {
                 return (
                   <button
                     key={n.id}
-                    onClick={() => navigateTo(n.id)}
+                    onClick={() => {
+                      setFromDashboard(false)
+                      navigateTo(n.id)
+                    }}
                     className={cx(
                       'flex flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[10.5px] font-bold transition-all cursor-pointer',
                       on ? 'bg-[#0f3057] text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'

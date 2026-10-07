@@ -59,7 +59,8 @@ export function Login({ onLogin, onSkip }: LoginProps) {
         weight: '68',
         weightUnit: 'kg',
         bloodGroup: 'O+',
-        onboarded: true,
+        onboarded: mode !== 'signup',
+        hasRecords: mode === 'signup' ? false : identifier.toLowerCase().includes('alex') || identifier.toLowerCase().includes('priya'),
       })
     }, 450)
   }
@@ -86,6 +87,7 @@ export function Login({ onLogin, onSkip }: LoginProps) {
         weightUnit: 'kg',
         bloodGroup: demoName === 'Alex Rao' ? 'O+' : 'B+',
         onboarded: true,
+        hasRecords: true,
       })
     }, 350)
   }

@@ -37,6 +37,7 @@ import {
 } from 'lucide-react'
 import { Badge, Btn, Card, ConfBar, ConfRing, DocPaper, Eyebrow, PageHead, cx, useEvidence, useL, useToast, formatAppointmentDate, type StatusKey } from './ui'
 import type { ConditionInfo, Appointment, MedicationItem, HealthAlert, UserHealthProfile } from './types'
+import { PersonalizedRecommendations } from './components/PersonalizedRecommendations'
 
 export type Go = (v: string, extra?: any) => void
 
@@ -628,7 +629,24 @@ export function Home({
         )}
       </section>
 
-      {/* SECTION 5: ASK HEALTHCOPILOT (Large Prominent Input Box) */}
+      {/* SECTION 5: PERSONALIZED FOOD & EXERCISE RECOMMENDATIONS */}
+      {conditions.length > 0 && (
+        <section className="space-y-4">
+          <Card className="p-6 md:p-7 border-teal-200/80 bg-white shadow-xs">
+            <PersonalizedRecommendations
+              conditionId={conditions.some((c) => c.status === 'attention') ? 'diabetes' : 'blood_pressure'}
+              hasRecords={user?.hasRecords !== false && conditions.length > 0}
+              onAskAi={(prompt) => {
+                if (onQuickAskAi) onQuickAskAi(prompt)
+                go('chat', { prompt })
+              }}
+              onNavigate={(v, extra) => go(v, extra)}
+            />
+          </Card>
+        </section>
+      )}
+
+      {/* SECTION 6: ASK HEALTHCOPILOT (Large Prominent Input Box) */}
       <section className="relative overflow-hidden rounded-[24px] border border-teal-200/80 bg-gradient-to-br from-teal-50/60 via-sky-50/30 to-white p-6 md:p-8 shadow-xs">
         <div className="max-w-2xl mb-5">
           <div className="flex items-center gap-2 mb-1.5">

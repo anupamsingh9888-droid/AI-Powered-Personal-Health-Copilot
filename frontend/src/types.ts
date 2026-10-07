@@ -14,6 +14,7 @@ export interface UserHealthProfile {
   weightUnit?: string
   bloodGroup?: string
   onboarded?: boolean
+  hasRecords?: boolean
 }
 
 export type HealthConditionId = 'diabetes' | 'blood_pressure' | 'heart' | 'kidney'
@@ -102,6 +103,7 @@ export interface Doctor {
   rating: number
   reviewsCount: number
   avatarChar: string
+  consultationModes?: ('in-person' | 'online')[]
   availableDates: {
     dateStr: string // e.g. "Tomorrow, 8 Oct"
     displayDay: string // e.g. "Tomorrow"
@@ -121,6 +123,8 @@ export interface Appointment {
   status: 'requested' | 'confirmed' | 'completed' | 'cancelled'
   hasReminder: boolean
   notes?: string
+  consultationType?: 'in-person' | 'online'
+  location?: string
 }
 
 export interface HealthAlert {

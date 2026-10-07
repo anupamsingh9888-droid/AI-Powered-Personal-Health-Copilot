@@ -26,6 +26,7 @@ import {
   X,
   MessageSquare,
   Plus,
+  Upload,
 } from 'lucide-react'
 import { Btn, cx, useL, useEvidence, useToast } from './ui'
 
@@ -35,6 +36,8 @@ export interface MessageSource {
   kind: 'lab' | 'rx' | 'vitals' | 'device'
   detail?: string
   regionKey?: string
+  targetView?: string
+  targetExtra?: any
 }
 
 export interface RecordAnswerPayload {
@@ -64,6 +67,12 @@ export interface ChatMessage {
   isGreeting?: boolean
   isUnclear?: boolean
   isOffTopic?: boolean
+  isMissingRecord?: boolean
+  missingRecordMessage?: {
+    heading?: string
+    body: string
+    missingItem?: string
+  }
   unclearMessage?: {
     heading?: string
     body: string
@@ -279,6 +288,49 @@ const ACTION_CARDS = [
   },
 ]
 
+export const GENERAL_ACTION_CARDS = [
+  {
+    id: 'normal-bp',
+    kicker: 'BLOOD PRESSURE',
+    prompt: 'What is a normal blood pressure range?',
+    description: 'Learn standard systolic and diastolic targets for healthy adults.',
+    icon: Activity,
+    iconColor: 'bg-blue-50 text-blue-700',
+  },
+  {
+    id: 'hb-role',
+    kicker: 'HEMOGLOBIN',
+    prompt: 'How does hemoglobin affect energy levels?',
+    description: 'Understand the oxygen-carrying role of hemoglobin and iron absorption.',
+    icon: FlaskConical,
+    iconColor: 'bg-teal-50 text-teal-700',
+  },
+  {
+    id: 'general-doc',
+    kicker: 'DOCTOR VISIT',
+    prompt: 'What questions should I ask my doctor during a checkup?',
+    description: 'Organize your thoughts, symptoms, and concerns before your appointment.',
+    icon: Stethoscope,
+    iconColor: 'bg-violet-50 text-violet-700',
+  },
+  {
+    id: 'sugar-habits',
+    kicker: 'BLOOD SUGAR',
+    prompt: 'What habits help maintain healthy blood sugar?',
+    description: 'Everyday nutritional pacing, dietary fiber, and light post-meal movement.',
+    icon: Droplets,
+    iconColor: 'bg-amber-50 text-amber-700',
+  },
+  {
+    id: 'med-safety',
+    kicker: 'MEDICATIONS',
+    prompt: 'What should I verify before starting a new medication?',
+    description: 'Checking dosing schedules, potential food interactions, and precautions.',
+    icon: Pill,
+    iconColor: 'bg-sky-50 text-sky-700',
+  },
+]
+
 export interface SavedConversation {
   id: string
   title: string
@@ -314,7 +366,7 @@ export const DEFAULT_CONVERSATIONS: SavedConversation[] = [
         timestamp: 'Today · 9:45 AM',
         recordAnswer: {
           shortAnswer:
-            'Your hemoglobin is a little below the usual reference range, while your white blood cells and platelets are normal.',
+            'Based on your records, your latest CBC report dated 7 October shows hemoglobin of 10.8 g/dL.',
           keyMeasurement: {
             label: 'Your latest result',
             value: '10.8 g/dL',
@@ -337,6 +389,7 @@ export const DEFAULT_CONVERSATIONS: SavedConversation[] = [
               date: '07 Oct 2026',
               kind: 'lab',
               regionKey: 'hb',
+              targetView: 'summary',
             },
           ],
         },
@@ -377,7 +430,7 @@ export const DEFAULT_CONVERSATIONS: SavedConversation[] = [
         timestamp: 'Today · 8:30 AM',
         recordAnswer: {
           shortAnswer:
-            'You currently have 4 medicines recorded in your health vault from your recent prescriptions.',
+            'Based on your records, your recent prescription dated 04 October from Dr. R. Menon lists 4 medicines recorded in your health profile.',
           keyMeasurement: {
             label: 'Active medicines',
             value: '4 prescriptions',
@@ -400,11 +453,13 @@ export const DEFAULT_CONVERSATIONS: SavedConversation[] = [
               date: '04 Oct 2026',
               kind: 'rx',
               regionKey: 'med1',
+              targetView: 'medications',
             },
             {
               title: 'Hospital Discharge Summary',
               date: '12 Sep 2026',
               kind: 'vitals',
+              targetView: 'timeline',
             },
           ],
         },
@@ -445,7 +500,7 @@ export const DEFAULT_CONVERSATIONS: SavedConversation[] = [
         timestamp: 'Yesterday',
         recordAnswer: {
           shortAnswer:
-            'Your fasting blood sugar and HbA1c are slightly elevated, and your post-meal glucose is higher than the usual target.',
+            'Based on your records, your latest metabolic log dated 07 October shows fasting blood sugar of 118 mg/dL and post-meal glucose of 156 mg/dL.',
           keyMeasurement: {
             label: 'Latest post-meal reading',
             value: '156 mg/dL',
@@ -468,11 +523,15 @@ export const DEFAULT_CONVERSATIONS: SavedConversation[] = [
               date: '07 Oct 2026',
               kind: 'lab',
               regionKey: 'hb',
+              targetView: 'conditions',
+              targetExtra: { conditionId: 'diabetes' },
             },
             {
               title: 'Laboratory Panel',
               date: '12 Sep 2026',
               kind: 'lab',
+              targetView: 'conditions',
+              targetExtra: { conditionId: 'diabetes' },
             },
           ],
         },
@@ -513,7 +572,7 @@ export const DEFAULT_CONVERSATIONS: SavedConversation[] = [
         timestamp: 'Yesterday',
         recordAnswer: {
           shortAnswer:
-            'Here are 3 concise talking points prepared from your latest tests for your consultation with Dr. Menon tomorrow at 10:30 AM.',
+            'Based on your records, here are 3 concise talking points for your consultation with Dr. Menon tomorrow at 10:30 AM.',
           keyMeasurement: {
             label: 'Upcoming appointment',
             value: 'Tomorrow · 10:30 AM',
@@ -535,12 +594,14 @@ export const DEFAULT_CONVERSATIONS: SavedConversation[] = [
               date: '07 Oct 2026',
               kind: 'lab',
               regionKey: 'hb',
+              targetView: 'summary',
             },
             {
               title: 'Prescription by Dr. R. Menon',
               date: '04 Oct 2026',
               kind: 'rx',
               regionKey: 'med1',
+              targetView: 'medications',
             },
           ],
         },
@@ -614,22 +675,165 @@ function generateChatTitle(firstPrompt: string): { title: string; category: Save
   return { title: shortened.charAt(0).toUpperCase() + shortened.slice(1), category: 'general' }
 }
 
+function detectMissingHealthTopic(normalized: string): string | null {
+  const missingKeywords: Record<string, string> = {
+    cholesterol: 'cholesterol or lipid panel',
+    lipid: 'lipid profile',
+    triglyceride: 'triglycerides test',
+    ldl: 'LDL cholesterol test',
+    hdl: 'HDL cholesterol test',
+    thyroid: 'thyroid (TSH) test',
+    tsh: 'TSH thyroid test',
+    b12: 'vitamin B12 test',
+    'vitamin b12': 'vitamin B12 test',
+    calcium: 'serum calcium test',
+    uric: 'uric acid test',
+    urine: 'urinalysis / urine report',
+    urinalysis: 'urine report',
+    xray: 'chest X-ray',
+    'x-ray': 'X-ray scan',
+    mri: 'MRI scan',
+    ct: 'CT scan',
+    ultrasound: 'ultrasound report',
+    scan: 'imaging scan report',
+    allergy: 'allergy panel',
+    asthma: 'asthma diagnosis record',
+    cancer: 'oncology screening record',
+    covid: 'COVID test or vaccination record',
+    vaccine: 'vaccination record',
+    temperature: 'body temperature log',
+    weight: 'body weight log',
+  }
+
+  for (const [kw, label] of Object.entries(missingKeywords)) {
+    if (normalized.includes(kw)) return label
+  }
+  return null
+}
+
+function getGeneralGuidance(normalized: string, topic?: string | null): GeneralAnswerPayload {
+  if (topic?.includes('cholesterol') || normalized.includes('cholesterol') || normalized.includes('lipid')) {
+    return {
+      shortAnswer: 'Total cholesterol for healthy adults is generally recommended to remain under 200 mg/dL.',
+      details: [
+        'LDL ("bad") cholesterol carries lipids into artery walls; lower values (< 100 mg/dL) are generally targeted.',
+        'HDL ("good") cholesterol carries excess cholesterol back to the liver for clearance (> 40 mg/dL for men, > 50 mg/dL for women).',
+        'A fasting lipid profile is typically advised every 1 to 5 years depending on cardiovascular risk factors.',
+      ],
+      helpfulTip: 'Soluble fiber from oats, beans, lentils, and apples naturally helps bind digestive cholesterol.',
+    }
+  }
+  if (topic?.includes('thyroid') || normalized.includes('thyroid') || normalized.includes('tsh')) {
+    return {
+      shortAnswer: 'Thyroid Stimulating Hormone (TSH) normally ranges between 0.4 and 4.0 mIU/L for most adults.',
+      details: [
+        'TSH is released by the pituitary gland to regulate thyroid hormone production (T3 and T4).',
+        'Elevated TSH can indicate an underactive thyroid (hypothyroidism), while suppressed TSH points toward overactivity (hyperthyroidism).',
+        'Common symptoms of thyroid imbalance include unexplained fatigue, weight changes, and cold or heat sensitivity.',
+      ],
+      helpfulTip: 'A simple morning blood test can accurately evaluate thyroid function if you experience chronic fatigue.',
+    }
+  }
+  if (topic?.includes('b12') || normalized.includes('b12') || normalized.includes('vitamin')) {
+    return {
+      shortAnswer: 'Vitamin B12 is essential for red blood cell formation, brain function, and cellular metabolism.',
+      details: [
+        'Standard laboratory reference ranges for serum B12 are typically 200 to 900 pg/mL.',
+        'Deficiency can cause persistent fatigue, tingling sensations in hands or feet, and mild cognitive fog.',
+        'People following plant-based diets or experiencing digestive absorption shifts often benefit from periodic checks.',
+      ],
+      helpfulTip: 'Taking B-complex vitamins with breakfast enhances daytime energy support and absorption.',
+    }
+  }
+  if (normalized.includes('blood pressure') || normalized.includes('bp') || normalized.includes('hypertension')) {
+    return {
+      shortAnswer: 'A healthy resting blood pressure for adults is defined as systolic under 120 mmHg and diastolic under 80 mmHg.',
+      details: [
+        'Systolic pressure (top number) measures the force exerted when the heart muscle pumps blood.',
+        'Diastolic pressure (bottom number) measures arterial resistance while the heart rests between beats.',
+        'Limiting daily sodium to under 2,000 mg, moderate physical activity, and restorative sleep protect blood vessel flexibility.',
+      ],
+      helpfulTip: 'Sit quietly with your back supported and feet flat for 5 minutes before taking a resting blood pressure reading.',
+    }
+  }
+  if (normalized.includes('hemoglobin') || normalized.includes('cbc') || normalized.includes('blood test') || normalized.includes('iron')) {
+    return {
+      shortAnswer: 'Hemoglobin is the iron-rich protein in red blood cells that transports oxygen throughout your body.',
+      details: [
+        'Standard reference ranges are typically 13.8 – 17.2 g/dL for adult males and 12.1 – 15.1 g/dL for non-pregnant adult females.',
+        'Mildly lower values can sometimes result in reduced stamina, pale skin, or mild breathlessness during exercise.',
+        'Iron absorption from lentils, leafy greens, and beans is significantly boosted when consumed alongside vitamin C.',
+      ],
+      helpfulTip: 'Squeezing fresh lemon juice over iron-rich foods like lentils or spinach can double or triple natural iron absorption.',
+    }
+  }
+  if (normalized.includes('sugar') || normalized.includes('glucose') || normalized.includes('diabetes')) {
+    return {
+      shortAnswer: 'Standard fasting blood glucose for healthy adults is normally between 70 and 99 mg/dL.',
+      details: [
+        'Fasting sugar of 100 to 125 mg/dL is categorized as impaired fasting glucose (prediabetes); 126 mg/dL or higher warrants medical evaluation.',
+        'Post-meal glucose two hours after eating is generally expected to stay below 140 mg/dL.',
+        'A gentle 10 to 15 minute walk after meals allows active muscles to absorb circulating glucose without requiring extra insulin.',
+      ],
+      helpfulTip: 'Consuming vegetables and fiber before carbohydrates in meals blunts post-meal glucose spikes significantly.',
+    }
+  }
+  if (normalized.includes('medicine') || normalized.includes('medication') || normalized.includes('pill') || normalized.includes('prescription')) {
+    return {
+      shortAnswer: 'Safe medication use involves adhering to dosing schedules, understanding food timing, and completing prescribed courses.',
+      details: [
+        'Always check with your doctor or pharmacist whether medications should be taken before food or after meals.',
+        'Never stop prescribed antibiotics early, even if you feel completely healthy, to prevent bacterial recurrence.',
+        'Keep an updated list of your current prescriptions, dosages, and vitamins to share with your physician during visits.',
+      ],
+      helpfulTip: 'Always store medicines in their original labeled blister packs so expiration dates and instructions remain clear.',
+    }
+  }
+  if (normalized.includes('doctor') || normalized.includes('appointment') || normalized.includes('consult')) {
+    return {
+      shortAnswer: 'Preparing 2 to 3 concise questions connecting your physical symptoms, medications, and recent test results maximizes consultation value.',
+      details: [
+        'Write down changes you have noticed in sleep, stamina, or digestion since your previous consultation.',
+        'Bring your actual prescription strips or recent diagnostic printouts directly to the consultation.',
+        'Ask your doctor clearly what follow-up steps, screenings, or lifestyle adjustments are recommended over the next month.',
+      ],
+      helpfulTip: 'Ask your doctor: "What is the single most important number or symptom I should monitor at home?"',
+    }
+  }
+  return {
+    shortAnswer: 'General health guidelines emphasize adequate hydration, balanced nutrition, daily movement, and routine preventive checkups.',
+    details: [
+      'Aim for 7 to 8 hours of quality sleep to support natural immune defense and cellular recovery.',
+      'Staying active with 150 minutes of moderate aerobic exercise weekly protects cardiovascular longevity.',
+      'Always review any unexplained test values or persistent new symptoms directly with your licensed physician.',
+    ],
+    helpfulTip: 'Keeping organized records of all medical tests helps healthcare providers make informed clinical decisions.',
+  }
+}
+
 export function HealthChat({
   userName = 'Alex',
   initialPrompt,
+  onNavigate,
+  hasRecords: initialHasRecords = true,
 }: {
   userName?: string
   initialPrompt?: string
+  onNavigate?: (viewId: string, extra?: any) => void
+  hasRecords?: boolean
 }) {
   const L = useL()
   const ev = useEvidence()
   const toast = useToast()
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
+  const [hasRecords, setHasRecords] = useState(initialHasRecords)
+
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [conversations, setConversations] = useState<SavedConversation[]>(() => {
+    if (!initialHasRecords) return []
     try {
       const stored = localStorage.getItem('healthcopilot_chat_history')
       if (stored) {
@@ -639,6 +843,16 @@ export function HealthChat({
     } catch {}
     return DEFAULT_CONVERSATIONS
   })
+
+  useEffect(() => {
+    setHasRecords(initialHasRecords)
+    if (!initialHasRecords) {
+      setMessages([])
+      setConversations([])
+    } else {
+      setConversations(DEFAULT_CONVERSATIONS)
+    }
+  }, [initialHasRecords])
   const [currentChatId, setCurrentChatId] = useState<string>(() => `chat-${Date.now()}`)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const [conversationToDelete, setConversationToDelete] = useState<SavedConversation | null>(null)
@@ -908,453 +1122,574 @@ export function HealthChat({
             'HealthCopilot आपके स्वास्थ्य रिकॉर्ड और स्वास्थ्य के बारे में सवालों के जवाब देने के लिए डिज़ाइन किया गया है।'
           ),
         }
-      } else if (
-        normalized.includes('report') ||
-        normalized.includes('cbc') ||
-        normalized.includes('hemoglobin') ||
-        normalized.includes('blood test') ||
-        normalized.includes('latest test')
-      ) {
-        // LAB REPORT / CBC / HEMOGLOBIN
-        assistantMsg = {
-          id: `bot-${Date.now()}`,
-          sender: 'assistant',
-          timestamp: 'Just now',
-          recordAnswer: {
-            shortAnswer:
-              'Your hemoglobin is a little below the usual reference range, while your white blood cells and platelets are normal.',
-            keyMeasurement: {
-              label: 'Your latest result',
-              value: '10.8 g/dL',
-              context: 'Usual reference range: 12.0 – 15.5 g/dL',
-            },
-            whatThisMeans: [
-              'Hemoglobin is the protein in red blood cells that carries oxygen to your body.',
-              'A result of 10.8 g/dL is mildly lower than typical targets, which can sometimes cause mild tiredness.',
-              'Your White Blood Cells (7.2 ×10³/µL) and Platelets (245 ×10³/µL) are healthy and normal.',
-              'Because one result can have many causes, it is worth discussing this with your doctor.',
-            ],
-            whatToDoNext: [
-              'Discuss this result with Dr. Menon during your consultation tomorrow.',
-              'Ask if a follow-up blood count or iron check is advised in 4 to 6 weeks.',
-              'Include iron-rich foods (spinach, lentils, beans) alongside vitamin C in your meals.',
-            ],
-            sources: [
-              {
-                title: 'CBC Blood Test',
-                date: '07 Oct 2026',
-                kind: 'lab',
-                regionKey: 'hb',
-              },
-            ],
-          },
-          generalAnswer: {
-            shortAnswer:
-              'Iron from meals is absorbed much more effectively when paired with vitamin C.',
-            details: [
-              'Foods like citrus fruits, tomatoes, and bell peppers help your body absorb plant iron.',
-              'Tea or coffee taken right after meals can reduce iron absorption.',
-            ],
-            helpfulTip:
-              'A squeeze of fresh lemon juice over lentils or spinach significantly boosts natural iron absorption.',
-          },
-          disclaimer:
-            'HealthCopilot does not diagnose medical conditions. Always review lab tests with your doctor.',
-        }
-      } else if (
-        normalized.includes('medicine') ||
-        normalized.includes('medication') ||
-        normalized.includes('pill') ||
-        normalized.includes('prescription') ||
-        normalized.includes('dose')
-      ) {
-        // MEDICATIONS
-        assistantMsg = {
-          id: `bot-${Date.now()}`,
-          sender: 'assistant',
-          timestamp: 'Just now',
-          recordAnswer: {
-            shortAnswer:
-              'You currently have 4 medicines recorded in your health vault from your recent prescriptions.',
-            keyMeasurement: {
-              label: 'Active medicines',
-              value: '4 prescriptions',
-              context: '1 completing tomorrow, 3 ongoing / as-needed',
-            },
-            whatThisMeans: [
-              'Amoxicillin 500 mg: Antibiotic taken twice daily with meals. Finishing tomorrow (Day 4 of 5).',
-              'Pantoprazole 40 mg: Stomach acid protection taken once daily 30 minutes before breakfast.',
-              'Vitamin D3 60,000 IU: Once weekly replenishment taken with milk or after a meal.',
-              'Paracetamol 650 mg: Only taken as needed for fever or body ache.',
-            ],
-            whatToDoNext: [
-              'Finish the final 24 hours of Amoxicillin on schedule as prescribed.',
-              'Take Pantoprazole on an empty stomach first thing in the morning.',
-              'Confirm the handwritten medicine on your 04 Oct prescription with Dr. Menon tomorrow.',
-            ],
-            sources: [
-              {
-                title: 'Prescription by Dr. R. Menon',
-                date: '04 Oct 2026',
-                kind: 'rx',
-                regionKey: 'med1',
-              },
-              {
-                title: 'Hospital Discharge Summary',
-                date: '12 Sep 2026',
-                kind: 'vitals',
-              },
-            ],
-          },
-          generalAnswer: {
-            shortAnswer:
-              'Completing prescribed antibiotics is essential even if symptoms have cleared.',
-            details: [
-              'Stopping antibiotics early can allow bacteria to regain strength and develop resistance.',
-              'Proton-pump medicines like Pantoprazole work best when taken before food activates stomach acid pumps.',
-            ],
-            helpfulTip:
-              'Always keep prescriptions in their original strips so you can check expiration dates and doctor instructions.',
-          },
-          disclaimer:
-            'Never change or stop your prescribed medication dosages without consulting your doctor.',
-        }
-      } else if (
-        normalized.includes('blood pressure') ||
-        normalized.includes('bp') ||
-        normalized.includes('hypertension')
-      ) {
-        // BLOOD PRESSURE
-        assistantMsg = {
-          id: `bot-${Date.now()}`,
-          sender: 'assistant',
-          timestamp: 'Just now',
-          recordAnswer: {
-            shortAnswer:
-              'Your blood pressure is in the healthy normal range across your recent clinic and discharge records.',
-            keyMeasurement: {
-              label: 'Latest blood pressure',
-              value: '118/76 mmHg',
-              context: 'Resting pulse: 68 bpm (Normal & stable)',
-            },
-            whatThisMeans: [
-              'Healthy blood pressure is generally under 120 mmHg systolic and under 80 mmHg diastolic.',
-              'Your reading of 118/76 mmHg shows that your heart and blood vessels are under healthy resting pressure.',
-              'Your resting heart rate of 68 beats per minute indicates a calm, normal rhythm.',
-            ],
-            whatToDoNext: [
-              'Continue moderate hydration and daily movement.',
-              'Because your readings are optimal, routine checks every few months are usually plenty.',
-            ],
-            sources: [
-              {
-                title: 'Clinic Checkup Note',
-                date: '28 Sep 2026',
-                kind: 'vitals',
-              },
-              {
-                title: 'Hospital Discharge Summary',
-                date: '12 Sep 2026',
-                kind: 'vitals',
-              },
-            ],
-          },
-          generalAnswer: {
-            shortAnswer:
-              'Everyday habits like sodium moderation and regular sleep help keep blood pressure steady.',
-            details: [
-              'Limiting excess salt to under 2,000 mg a day protects blood vessels.',
-              'Regular walking helps keep arteries flexible and resilient.',
-            ],
-            helpfulTip:
-              'Rest for 5 minutes before taking a blood pressure reading to ensure the number reflects your true resting baseline.',
-          },
-          disclaimer:
-            'HealthCopilot stores and visualizes your readings. Check with your doctor for diagnostic evaluation.',
-        }
-      } else if (
-        normalized.includes('sugar') ||
-        normalized.includes('glucose') ||
-        normalized.includes('diabetes')
-      ) {
-        // BLOOD SUGAR
-        assistantMsg = {
-          id: `bot-${Date.now()}`,
-          sender: 'assistant',
-          timestamp: 'Just now',
-          recordAnswer: {
-            shortAnswer:
-              'Your fasting blood sugar and HbA1c are slightly elevated, and your post-meal glucose is higher than the usual target.',
-            keyMeasurement: {
-              label: 'Latest post-meal reading',
-              value: '156 mg/dL',
-              context: 'Target: < 140 mg/dL · Fasting: 118 mg/dL',
-            },
-            whatThisMeans: [
-              'Fasting blood sugar of 118 mg/dL is slightly above the standard healthy target of under 100 mg/dL.',
-              'Post-meal glucose of 156 mg/dL indicates your body takes slightly longer to clear sugar after carbohydrate meals.',
-              'Your 3-month HbA1c of 6.4% sits at the upper edge of the prediabetes range (5.7 – 6.4%).',
-              'This is not a sudden diagnosis of diabetes, but a pattern that can often improve with simple daily adjustments.',
-            ],
-            whatToDoNext: [
-              'Take a gentle 10 to 15 minute walk after lunch and dinner.',
-              'Pair carbohydrates with vegetables, lentils, or nuts to blunt glucose spikes.',
-              'Discuss dietary suggestions and follow-up screening with Dr. Ananya Sen.',
-            ],
-            sources: [
-              {
-                title: 'Metabolic Log',
-                date: '07 Oct 2026',
-                kind: 'lab',
-                regionKey: 'hb',
-              },
-              {
-                title: 'Laboratory Panel',
-                date: '12 Sep 2026',
-                kind: 'lab',
-              },
-            ],
-          },
-          generalAnswer: {
-            shortAnswer:
-              'Gentle movement after meals helps muscles absorb blood sugar naturally without requiring extra insulin.',
-            details: [
-              'Walking 10 minutes after eating can lower peak blood sugar rises by up to 20%.',
-              'Eating fiber and protein first before rice or bread helps smooth digestion.',
-            ],
-            helpfulTip:
-              'Drinking a glass of water before meals also aids digestion and satiety.',
-          },
-          disclaimer:
-            'Consult your physician or endocrinologist before making major dietary or medical changes.',
-        }
-      } else if (
-        normalized.includes('discuss with doctor') ||
-        normalized.includes('what should i discuss') ||
-        normalized.includes('doctor') ||
-        normalized.includes('appointment')
-      ) {
-        // DOCTOR APPOINTMENT PREPARATION
-        assistantMsg = {
-          id: `bot-${Date.now()}`,
-          sender: 'assistant',
-          timestamp: 'Just now',
-          recordAnswer: {
-            shortAnswer:
-              'Here are 3 concise talking points prepared from your latest tests for your consultation with Dr. Menon tomorrow at 10:30 AM.',
-            keyMeasurement: {
-              label: 'Upcoming appointment',
-              value: 'Tomorrow · 10:30 AM',
-              context: 'Dr. R. Menon · Sunrise Family Clinic',
-            },
-            whatThisMeans: [
-              'Hemoglobin 10.8 g/dL: Mildly lower than the usual 12.0 – 15.5 g/dL target.',
-              'Amoxicillin completion: Finishes tomorrow (Day 5 of 5) for respiratory recovery.',
-              'Post-meal glucose 156 mg/dL: Suggests discussing simple nutrition or follow-up tests.',
-            ],
-            whatToDoNext: [
-              'Question 1: "Should I repeat the CBC blood test or check ferritin in 4 to 6 weeks to ensure my hemoglobin recovers?"',
-              'Question 2: "Can you confirm the handwritten medicine name on my 04 Oct prescription?"',
-              'Question 3: "Do you recommend any dietary changes or follow-up for my 156 mg/dL post-meal glucose reading?"',
-            ],
-            sources: [
-              {
-                title: 'CBC Blood Test',
-                date: '07 Oct 2026',
-                kind: 'lab',
-                regionKey: 'hb',
-              },
-              {
-                title: 'Prescription by Dr. R. Menon',
-                date: '04 Oct 2026',
-                kind: 'rx',
-                regionKey: 'med1',
-              },
-            ],
-          },
-          generalAnswer: {
-            shortAnswer:
-              'Doctors appreciate short, organized questions that connect your symptoms, medications, and test numbers.',
-            details: [
-              'Write down your top 2 or 3 questions before stepping into the consultation room.',
-              'Mention how you have been feeling physically since finishing your medicines.',
-            ],
-            helpfulTip:
-              'You can show this screen directly to your doctor during your consultation.',
-          },
-          disclaimer:
-            'HealthCopilot helps you organize your thoughts for your doctor. Your doctor makes all clinical decisions.',
-        }
-      } else if (
-        normalized.includes('change') ||
-        normalized.includes('month') ||
-        normalized.includes('summarize') ||
-        normalized.includes('recently')
-      ) {
-        // RECENT HEALTH SHIFTS
-        assistantMsg = {
-          id: `bot-${Date.now()}`,
-          sender: 'assistant',
-          timestamp: 'Just now',
-          recordAnswer: {
-            shortAnswer:
-              'Your health records over the past 30 days show steady recovery from acute illness, with stable vitals and one blood count value to review.',
-            keyMeasurement: {
-              label: 'Recent status',
-              value: 'Recovering & Stable',
-              context: '3 documents analyzed in your vault',
-            },
-            whatThisMeans: [
-              'Infection inflammation has cleared (white blood cells normal at 7.2 ×10³/µL).',
-              'Blood pressure has remained stable and normal at 118/76 mmHg.',
-              'Hemoglobin is mildly lower at 10.8 g/dL, which frequently happens during recovery.',
-            ],
-            whatToDoNext: [
-              'Attend your scheduled clinic follow-up tomorrow with Dr. Menon.',
-              'Complete the remaining day of your prescribed antibiotics.',
-              'Maintain daily hydration and nourishing meals.',
-            ],
-            sources: [
-              {
-                title: 'CBC Blood Test',
-                date: '07 Oct 2026',
-                kind: 'lab',
-                regionKey: 'hb',
-              },
-              {
-                title: 'Clinic Prescription',
-                date: '04 Oct 2026',
-                kind: 'rx',
-                regionKey: 'med1',
-              },
-              {
-                title: 'Hospital Discharge Summary',
-                date: '12 Sep 2026',
-                kind: 'vitals',
-              },
-            ],
-          },
-          generalAnswer: {
-            shortAnswer:
-              'Tracking health records over time makes it easy to spot small shifts before they turn into bigger concerns.',
-            details: [
-              'Comparing discharge notes and follow-up lab tests confirms whether recovery is on track.',
-              'Regular vital tracking provides peace of mind.',
-            ],
-          },
-          disclaimer:
-            'All records shown are summarized directly from documents in your health vault.',
-        }
-      } else if (
-        normalized.includes('kidney') ||
-        normalized.includes('egfr') ||
-        normalized.includes('creatinine') ||
-        normalized.includes('renal')
-      ) {
-        // KIDNEY HEALTH
-        assistantMsg = {
-          id: `bot-${Date.now()}`,
-          sender: 'assistant',
-          timestamp: 'Just now',
-          recordAnswer: {
-            shortAnswer:
-              'Your kidney function is well functioning and healthy based on your laboratory panel.',
-            keyMeasurement: {
-              label: 'eGFR Filtration Rate',
-              value: '104 mL/min',
-              context: 'Normal target: > 90 mL/min (Optimal filtration)',
-            },
-            whatThisMeans: [
-              'eGFR of 104 mL/min indicates excellent natural blood filtration by your kidneys.',
-              'Serum creatinine is 0.88 mg/dL, well within the normal healthy range (0.70 – 1.30 mg/dL).',
-              'Blood Urea Nitrogen (BUN) is 14 mg/dL (target 7 – 20 mg/dL), showing healthy protein waste processing.',
-            ],
-            whatToDoNext: [
-              'Maintain daily water hydration (2 to 2.5 liters) to support natural renal function.',
-              'No special follow-up or kidney interventions are required at this time.',
-            ],
-            sources: [
-              {
-                title: 'Laboratory Panel',
-                date: '12 Sep 2026',
-                kind: 'lab',
-              },
-            ],
-          },
-          generalAnswer: {
-            shortAnswer:
-              'Staying well hydrated and keeping blood pressure normal are the two most protective habits for kidney longevity.',
-            details: [
-              'Drinking sufficient water helps the kidneys filter waste products from your blood.',
-              'Avoiding overuse of NSAID pain medications helps preserve kidney filtration filters over time.',
-            ],
-            helpfulTip:
-              'Pale clear-yellow urine is usually a quick sign of healthy daily hydration.',
-          },
-          disclaimer:
-            'HealthCopilot stores and visualizes your lab records. Consult your doctor for diagnosis.',
-        }
-      } else {
-        // GENERAL HEALTH / CUSTOM INQUIRY
-        const asksAboutRecords =
+      } else if (!hasRecords) {
+        // ==========================================
+        // 4. NEW USER / NO DATA STATE
+        // AI must NOT pretend to know user's health when no records exist.
+        // ==========================================
+        const asksAboutPersonalHealth =
           normalized.includes('my') ||
           normalized.includes('me') ||
-          normalized.includes('record') ||
-          normalized.includes('profile') ||
-          normalized.includes('vault') ||
-          normalized.includes('history')
+          normalized.includes('mine') ||
+          normalized.includes('i have') ||
+          normalized.includes('report') ||
+          normalized.includes('cbc') ||
+          normalized.includes('hemoglobin') ||
+          normalized.includes('medicine') ||
+          normalized.includes('medication') ||
+          normalized.includes('pill') ||
+          normalized.includes('prescription') ||
+          normalized.includes('bp') ||
+          normalized.includes('pressure') ||
+          normalized.includes('sugar') ||
+          normalized.includes('glucose') ||
+          normalized.includes('appointment') ||
+          normalized.includes('doctor') ||
+          normalized.includes('result') ||
+          normalized.includes('test') ||
+          normalized.includes('trend') ||
+          normalized.includes('history') ||
+          normalized.includes('vault')
 
-        assistantMsg = {
-          id: `bot-${Date.now()}`,
-          sender: 'assistant',
-          timestamp: 'Just now',
-          ...(asksAboutRecords
-            ? {
-                recordAnswer: {
-                  shortAnswer: `Regarding your records: HealthCopilot summarized your health vault profile.`,
-                  keyMeasurement: {
-                    label: 'Patient profile',
-                    value: 'Alex (34, Male)',
-                    context: 'BP: 118/76 · Hb: 10.8 · 4 Active Meds',
-                  },
-                  whatThisMeans: [
-                    'Your overall vital signs and kidney parameters are well functioning and stable.',
-                    'Your recent CBC test shows mild hemoglobin lowering (10.8 g/dL), while other blood counts are healthy.',
-                    'You are currently completing a short course of Amoxicillin and taking Pantoprazole.',
-                  ],
-                  whatToDoNext: [
-                    'Bring this specific question to Dr. Menon during your consultation tomorrow.',
-                    'Keep a brief note if you experience any physical symptoms related to this topic.',
-                  ],
-                  sources: [
-                    {
-                      title: 'CBC Blood Test',
-                      date: '07 Oct 2026',
-                      kind: 'lab',
-                      regionKey: 'hb',
-                    },
-                    {
-                      title: 'Prescription by Dr. R. Menon',
-                      date: '04 Oct 2026',
-                      kind: 'rx',
-                      regionKey: 'med1',
-                    },
-                  ],
+        if (asksAboutPersonalHealth) {
+          assistantMsg = {
+            id: `bot-${Date.now()}`,
+            sender: 'assistant',
+            timestamp: 'Just now',
+            isMissingRecord: true,
+            missingRecordMessage: {
+              heading: L(
+                "I don't have enough information in your health records to answer that personally.",
+                "व्यक्तिगत रूप से इसका उत्तर देने के लिए आपके स्वास्थ्य रिकॉर्ड में पर्याप्त जानकारी नहीं है।"
+              ),
+              body: L(
+                'Your health record is currently empty. Upload a medical report, prescription, or diagnostic document to start asking personalized health questions.',
+                'आपका स्वास्थ्य रिकॉर्ड वर्तमान में खाली है। व्यक्तिगत स्वास्थ्य प्रश्न पूछने के लिए मेडिकल रिपोर्ट, पर्चा या डायग्नोस्टिक दस्तावेज़ अपलोड करें।'
+              ),
+            },
+            generalAnswer: getGeneralGuidance(normalized),
+            disclaimer: L(
+              'HealthCopilot does not diagnose or prescribe treatments. Always consult your doctor.',
+              'HealthCopilot बीमारी का निदान या दवा नहीं लिखता। कृपया अपने डॉक्टर से परामर्श करें।'
+            ),
+          }
+        } else {
+          // General health information query from user with no records
+          assistantMsg = {
+            id: `bot-${Date.now()}`,
+            sender: 'assistant',
+            timestamp: 'Just now',
+            generalAnswer: getGeneralGuidance(normalized),
+            disclaimer: L(
+              'HealthCopilot provides health literacy and information. Always consult your doctor for medical advice.',
+              'HealthCopilot स्वास्थ्य जागरूकता और जानकारी प्रदान करता है। चिकित्सा सलाह के लिए हमेशा डॉक्टर से परामर्श करें।'
+            ),
+          }
+        }
+      } else {
+        // ==========================================
+        // 5. USER HAS RECORDS (DEMO ACCOUNT)
+        // Check for unuploaded topics vs verified records
+        // ==========================================
+        const missingTopic = detectMissingHealthTopic(normalized)
+        const isAskingAboutMissingRecord =
+          missingTopic &&
+          (normalized.includes('my') ||
+            normalized.includes('me') ||
+            normalized.includes('report') ||
+            normalized.includes('result') ||
+            normalized.includes('level') ||
+            normalized.includes('number') ||
+            normalized.includes('test'))
+
+        if (isAskingAboutMissingRecord && missingTopic) {
+          // User asked for a metric NOT present in records -> NEVER INVENT DATA
+          assistantMsg = {
+            id: `bot-${Date.now()}`,
+            sender: 'assistant',
+            timestamp: 'Just now',
+            isMissingRecord: true,
+            missingRecordMessage: {
+              heading: L(
+                "I don't have enough information in your health records to answer that personally.",
+                "व्यक्तिगत रूप से इसका उत्तर देने के लिए आपके स्वास्थ्य रिकॉर्ड में पर्याप्त जानकारी नहीं है।"
+              ),
+              body: L(
+                `HealthCopilot currently only has your CBC blood test, 4 prescriptions, blood pressure, and blood sugar records on file. We do not have a ${missingTopic} in your records. Upload this document to view personalized answers.`,
+                `HealthCopilot के पास वर्तमान में केवल CBC ब्लड टेस्ट, 4 नुस्खे, ब्लड प्रेशर और ब्लड शुगर रिकॉर्ड हैं। आपके रिकॉर्ड में कोई ${missingTopic} नहीं है। व्यक्तिगत उत्तर पाने के लिए यह दस्तावेज़ अपलोड करें।`
+              ),
+              missingItem: missingTopic,
+            },
+            generalAnswer: getGeneralGuidance(normalized, missingTopic),
+            disclaimer: L(
+              'HealthCopilot does not diagnose medical conditions. Always review lab tests with your doctor.',
+              'HealthCopilot बीमारी का निदान नहीं करता। हमेशा डॉक्टर से परामर्श करें।'
+            ),
+          }
+        } else if (
+          normalized.includes('report') ||
+          normalized.includes('cbc') ||
+          normalized.includes('hemoglobin') ||
+          normalized.includes('blood test') ||
+          normalized.includes('latest test')
+        ) {
+          // LAB REPORT / CBC / HEMOGLOBIN
+          assistantMsg = {
+            id: `bot-${Date.now()}`,
+            sender: 'assistant',
+            timestamp: 'Just now',
+            recordAnswer: {
+              shortAnswer:
+                'Based on your records, your latest CBC report dated 7 October shows hemoglobin of 10.8 g/dL.',
+              keyMeasurement: {
+                label: 'Your latest result',
+                value: '10.8 g/dL',
+                context: 'Usual reference range: 12.0 – 15.5 g/dL',
+              },
+              whatThisMeans: [
+                'Hemoglobin is the protein in red blood cells that carries oxygen to your body.',
+                'A result of 10.8 g/dL is mildly lower than typical targets, which can sometimes cause mild tiredness.',
+                'Your White Blood Cells (7.2 ×10³/µL) and Platelets (245 ×10³/µL) are healthy and normal.',
+                'Because one result can have many causes, it is worth discussing this with your doctor.',
+              ],
+              whatToDoNext: [
+                'Discuss this result with Dr. Menon during your consultation tomorrow.',
+                'Ask if a follow-up blood count or iron check is advised in 4 to 6 weeks.',
+                'Include iron-rich foods (spinach, lentils, beans) alongside vitamin C in your meals.',
+              ],
+              sources: [
+                {
+                  title: 'CBC Blood Test',
+                  date: '07 Oct 2026',
+                  kind: 'lab',
+                  regionKey: 'hb',
+                  targetView: 'summary',
                 },
-              }
-            : {}),
-          generalAnswer: {
-            shortAnswer:
-              'General medical guidelines emphasize regular hydration, balanced nutrition, daily movement, and timely doctor checkups.',
-            details: [
-              'Good sleep and light daily movement support natural body recovery.',
-              'Never hesitate to ask your doctor to clarify any health term, report value, or prescription instruction.',
-            ],
-            helpfulTip:
-              'For specific personal questions, sharing your actual lab numbers with your doctor gives you the best personalized guidance.',
-          },
-          disclaimer:
-            'HealthCopilot provides health literacy and information. Always consult your doctor for medical advice.',
+              ],
+            },
+            generalAnswer: {
+              shortAnswer:
+                'Iron from meals is absorbed much more effectively when paired with vitamin C.',
+              details: [
+                'Foods like citrus fruits, tomatoes, and bell peppers help your body absorb plant iron.',
+                'Tea or coffee taken right after meals can reduce iron absorption.',
+              ],
+              helpfulTip:
+                'A squeeze of fresh lemon juice over lentils or spinach significantly boosts natural iron absorption.',
+            },
+            disclaimer:
+              'HealthCopilot does not diagnose medical conditions. Always review lab tests with your doctor.',
+          }
+        } else if (
+          normalized.includes('medicine') ||
+          normalized.includes('medication') ||
+          normalized.includes('pill') ||
+          normalized.includes('prescription') ||
+          normalized.includes('amoxicillin') ||
+          normalized.includes('pantoprazole') ||
+          normalized.includes('dose')
+        ) {
+          // MEDICATIONS
+          assistantMsg = {
+            id: `bot-${Date.now()}`,
+            sender: 'assistant',
+            timestamp: 'Just now',
+            recordAnswer: {
+              shortAnswer:
+                'Based on your records, your latest prescription dated 04 October from Dr. R. Menon lists 4 medicines: Amoxicillin 500 mg, Pantoprazole 40 mg, Vitamin D3 60,000 IU, and Paracetamol 650 mg.',
+              keyMeasurement: {
+                label: 'Active medicines',
+                value: '4 prescriptions',
+                context: '1 completing tomorrow, 3 ongoing / as-needed',
+              },
+              whatThisMeans: [
+                'Amoxicillin 500 mg: Antibiotic taken twice daily with meals. Finishing tomorrow (Day 4 of 5).',
+                'Pantoprazole 40 mg: Stomach acid protection taken once daily 30 minutes before breakfast.',
+                'Vitamin D3 60,000 IU: Once weekly replenishment taken with milk or after a meal.',
+                'Paracetamol 650 mg: Only taken as needed for fever or body ache.',
+              ],
+              whatToDoNext: [
+                'Finish the final 24 hours of Amoxicillin on schedule as prescribed.',
+                'Take Pantoprazole on an empty stomach first thing in the morning.',
+                'Confirm the handwritten medicine on your 04 Oct prescription with Dr. Menon tomorrow.',
+              ],
+              sources: [
+                {
+                  title: 'Prescription by Dr. R. Menon',
+                  date: '04 Oct 2026',
+                  kind: 'rx',
+                  regionKey: 'med1',
+                  targetView: 'medications',
+                },
+                {
+                  title: 'Hospital Discharge Summary',
+                  date: '12 Sep 2026',
+                  kind: 'vitals',
+                  targetView: 'timeline',
+                },
+              ],
+            },
+            generalAnswer: {
+              shortAnswer:
+                'Completing prescribed antibiotics is essential even if symptoms have cleared.',
+              details: [
+                'Stopping antibiotics early can allow bacteria to regain strength and develop resistance.',
+                'Proton-pump medicines like Pantoprazole work best when taken before food activates stomach acid pumps.',
+              ],
+              helpfulTip:
+                'Always keep prescriptions in their original strips so you can check expiration dates and doctor instructions.',
+            },
+            disclaimer:
+              'Never change or stop your prescribed medication dosages without consulting your doctor.',
+          }
+        } else if (
+          normalized.includes('blood pressure') ||
+          normalized.includes('bp') ||
+          normalized.includes('hypertension') ||
+          normalized.includes('pulse')
+        ) {
+          // BLOOD PRESSURE
+          assistantMsg = {
+            id: `bot-${Date.now()}`,
+            sender: 'assistant',
+            timestamp: 'Just now',
+            recordAnswer: {
+              shortAnswer:
+                'Based on your records, your latest recorded blood pressure from your 28 September clinic checkup note is 118/76 mmHg with a resting pulse of 68 bpm (healthy normal).',
+              keyMeasurement: {
+                label: 'Latest blood pressure',
+                value: '118/76 mmHg',
+                context: 'Resting pulse: 68 bpm (Normal & stable)',
+              },
+              whatThisMeans: [
+                'Healthy blood pressure is generally under 120 mmHg systolic and under 80 mmHg diastolic.',
+                'Your reading of 118/76 mmHg shows that your heart and blood vessels are under healthy resting pressure.',
+                'Your resting heart rate of 68 beats per minute indicates a calm, normal rhythm.',
+              ],
+              whatToDoNext: [
+                'Continue moderate hydration and daily movement.',
+                'Because your readings are optimal, routine checks every few months are usually plenty.',
+              ],
+              sources: [
+                {
+                  title: 'Clinic Checkup Note',
+                  date: '28 Sep 2026',
+                  kind: 'vitals',
+                  targetView: 'conditions',
+                  targetExtra: { conditionId: 'blood_pressure' },
+                },
+                {
+                  title: 'Hospital Discharge Summary',
+                  date: '12 Sep 2026',
+                  kind: 'vitals',
+                  targetView: 'timeline',
+                },
+              ],
+            },
+            generalAnswer: {
+              shortAnswer:
+                'Everyday habits like sodium moderation and regular sleep help keep blood pressure steady.',
+              details: [
+                'Limiting excess salt to under 2,000 mg a day protects blood vessels.',
+                'Regular walking helps keep arteries flexible and resilient.',
+              ],
+              helpfulTip:
+                'Rest for 5 minutes before taking a blood pressure reading to ensure the number reflects your true resting baseline.',
+            },
+            disclaimer:
+              'HealthCopilot stores and visualizes your readings. Check with your doctor for diagnostic evaluation.',
+          }
+        } else if (
+          normalized.includes('sugar') ||
+          normalized.includes('glucose') ||
+          normalized.includes('diabetes') ||
+          normalized.includes('hba1c')
+        ) {
+          // BLOOD SUGAR
+          assistantMsg = {
+            id: `bot-${Date.now()}`,
+            sender: 'assistant',
+            timestamp: 'Just now',
+            recordAnswer: {
+              shortAnswer:
+                'Based on your records, your latest metabolic log dated 07 October shows fasting blood sugar of 118 mg/dL and post-meal glucose of 156 mg/dL, with HbA1c at 6.4%.',
+              keyMeasurement: {
+                label: 'Latest post-meal reading',
+                value: '156 mg/dL',
+                context: 'Target: < 140 mg/dL · Fasting: 118 mg/dL',
+              },
+              whatThisMeans: [
+                'Fasting blood sugar of 118 mg/dL is slightly above the standard healthy target of under 100 mg/dL.',
+                'Post-meal glucose of 156 mg/dL indicates your body takes slightly longer to clear sugar after carbohydrate meals.',
+                'Your 3-month HbA1c of 6.4% sits at the upper edge of the prediabetes range (5.7 – 6.4%).',
+                'This is not a sudden diagnosis of diabetes, but a pattern that can often improve with simple daily adjustments.',
+              ],
+              whatToDoNext: [
+                'Take a gentle 10 to 15 minute walk after lunch and dinner.',
+                'Pair carbohydrates with vegetables, lentils, or nuts to blunt glucose spikes.',
+                'Discuss dietary suggestions and follow-up screening with Dr. Ananya Sen.',
+              ],
+              sources: [
+                {
+                  title: 'Metabolic Log',
+                  date: '07 Oct 2026',
+                  kind: 'lab',
+                  regionKey: 'hb',
+                  targetView: 'conditions',
+                  targetExtra: { conditionId: 'diabetes' },
+                },
+                {
+                  title: 'Laboratory Panel',
+                  date: '12 Sep 2026',
+                  kind: 'lab',
+                  targetView: 'conditions',
+                  targetExtra: { conditionId: 'diabetes' },
+                },
+              ],
+            },
+            generalAnswer: {
+              shortAnswer:
+                'Gentle movement after meals helps muscles absorb blood sugar naturally without requiring extra insulin.',
+              details: [
+                'Walking 10 minutes after eating can lower peak blood sugar rises by up to 20%.',
+                'Eating fiber and protein first before rice or bread helps smooth digestion.',
+              ],
+              helpfulTip:
+                'Drinking a glass of water before meals also aids digestion and satiety.',
+            },
+            disclaimer:
+              'Consult your physician or endocrinologist before making major dietary or medical changes.',
+          }
+        } else if (
+          normalized.includes('discuss with doctor') ||
+          normalized.includes('what should i discuss') ||
+          normalized.includes('doctor') ||
+          normalized.includes('appointment') ||
+          normalized.includes('dr. menon') ||
+          normalized.includes('menon')
+        ) {
+          // DOCTOR APPOINTMENT PREPARATION
+          assistantMsg = {
+            id: `bot-${Date.now()}`,
+            sender: 'assistant',
+            timestamp: 'Just now',
+            recordAnswer: {
+              shortAnswer:
+                'Based on your records, you have an upcoming consultation with Dr. R. Menon tomorrow at 10:30 AM at Sunrise Family Clinic.',
+              keyMeasurement: {
+                label: 'Upcoming appointment',
+                value: 'Tomorrow · 10:30 AM',
+                context: 'Dr. R. Menon · Sunrise Family Clinic',
+              },
+              whatThisMeans: [
+                'Hemoglobin 10.8 g/dL: Mildly lower than the usual 12.0 – 15.5 g/dL target.',
+                'Amoxicillin completion: Finishes tomorrow (Day 5 of 5) for respiratory recovery.',
+                'Post-meal glucose 156 mg/dL: Suggests discussing simple nutrition or follow-up tests.',
+              ],
+              whatToDoNext: [
+                'Question 1: "Should I repeat the CBC blood test or check ferritin in 4 to 6 weeks to ensure my hemoglobin recovers?"',
+                'Question 2: "Can you confirm the handwritten medicine name on my 04 Oct prescription?"',
+                'Question 3: "Do you recommend any dietary changes or follow-up for my 156 mg/dL post-meal glucose reading?"',
+              ],
+              sources: [
+                {
+                  title: 'Doctor Appointment Schedule',
+                  date: 'Tomorrow · 10:30 AM',
+                  kind: 'vitals',
+                  targetView: 'appointments',
+                },
+                {
+                  title: 'CBC Blood Test',
+                  date: '07 Oct 2026',
+                  kind: 'lab',
+                  regionKey: 'hb',
+                  targetView: 'summary',
+                },
+                {
+                  title: 'Prescription by Dr. R. Menon',
+                  date: '04 Oct 2026',
+                  kind: 'rx',
+                  regionKey: 'med1',
+                  targetView: 'medications',
+                },
+              ],
+            },
+            generalAnswer: {
+              shortAnswer:
+                'Doctors appreciate short, organized questions that connect your symptoms, medications, and test numbers.',
+              details: [
+                'Write down your top 2 or 3 questions before stepping into the consultation room.',
+                'Mention how you have been feeling physically since finishing your medicines.',
+              ],
+              helpfulTip:
+                'You can show this screen directly to your doctor during your consultation.',
+            },
+            disclaimer:
+              'HealthCopilot helps you organize your thoughts for your doctor. Your doctor makes all clinical decisions.',
+          }
+        } else if (
+          normalized.includes('change') ||
+          normalized.includes('month') ||
+          normalized.includes('summarize') ||
+          normalized.includes('recently')
+        ) {
+          // RECENT HEALTH SHIFTS
+          assistantMsg = {
+            id: `bot-${Date.now()}`,
+            sender: 'assistant',
+            timestamp: 'Just now',
+            recordAnswer: {
+              shortAnswer:
+                'Based on your records over the past 30 days, your health shows steady recovery with stable vitals (BP 118/76 mmHg) and one hemoglobin result (10.8 g/dL) to review.',
+              keyMeasurement: {
+                label: 'Recent status',
+                value: 'Recovering & Stable',
+                context: '4 verified records in your health record',
+              },
+              whatThisMeans: [
+                'Infection inflammation has cleared (white blood cells normal at 7.2 ×10³/µL).',
+                'Blood pressure has remained stable and normal at 118/76 mmHg.',
+                'Hemoglobin is mildly lower at 10.8 g/dL, which frequently happens during recovery.',
+              ],
+              whatToDoNext: [
+                'Attend your scheduled clinic follow-up tomorrow with Dr. Menon.',
+                'Complete the remaining day of your prescribed antibiotics.',
+                'Maintain daily hydration and nourishing meals.',
+              ],
+              sources: [
+                {
+                  title: 'CBC Blood Test',
+                  date: '07 Oct 2026',
+                  kind: 'lab',
+                  regionKey: 'hb',
+                  targetView: 'summary',
+                },
+                {
+                  title: 'Clinic Prescription',
+                  date: '04 Oct 2026',
+                  kind: 'rx',
+                  regionKey: 'med1',
+                  targetView: 'medications',
+                },
+                {
+                  title: 'Hospital Discharge Summary',
+                  date: '12 Sep 2026',
+                  kind: 'vitals',
+                  targetView: 'timeline',
+                },
+              ],
+            },
+            generalAnswer: {
+              shortAnswer:
+                'Tracking health records over time makes it easy to spot small shifts before they turn into bigger concerns.',
+              details: [
+                'Comparing discharge notes and follow-up lab tests confirms whether recovery is on track.',
+                'Regular vital tracking provides peace of mind.',
+              ],
+            },
+            disclaimer:
+              'All records shown are summarized directly from documents in your health vault.',
+          }
+        } else if (
+          normalized.includes('kidney') ||
+          normalized.includes('egfr') ||
+          normalized.includes('creatinine') ||
+          normalized.includes('renal')
+        ) {
+          // KIDNEY HEALTH
+          assistantMsg = {
+            id: `bot-${Date.now()}`,
+            sender: 'assistant',
+            timestamp: 'Just now',
+            recordAnswer: {
+              shortAnswer:
+                'Based on your records, your kidney function from your 12 September discharge panel is well functioning with eGFR of 104 mL/min and creatinine of 0.88 mg/dL.',
+              keyMeasurement: {
+                label: 'eGFR Filtration Rate',
+                value: '104 mL/min',
+                context: 'Normal target: > 90 mL/min (Optimal filtration)',
+              },
+              whatThisMeans: [
+                'eGFR of 104 mL/min indicates excellent natural blood filtration by your kidneys.',
+                'Serum creatinine is 0.88 mg/dL, well within the normal healthy range (0.70 – 1.30 mg/dL).',
+                'Blood Urea Nitrogen (BUN) is 14 mg/dL (target 7 – 20 mg/dL), showing healthy protein waste processing.',
+              ],
+              whatToDoNext: [
+                'Maintain daily water hydration (2 to 2.5 liters) to support natural renal function.',
+                'No special follow-up or kidney interventions are required at this time.',
+              ],
+              sources: [
+                {
+                  title: 'Laboratory Panel',
+                  date: '12 Sep 2026',
+                  kind: 'lab',
+                  targetView: 'conditions',
+                  targetExtra: { conditionId: 'kidney' },
+                },
+              ],
+            },
+            generalAnswer: {
+              shortAnswer:
+                'Staying well hydrated and keeping blood pressure normal are the two most protective habits for kidney longevity.',
+              details: [
+                'Drinking sufficient water helps the kidneys filter waste products from your blood.',
+                'Avoiding overuse of NSAID pain medications helps preserve kidney filtration filters over time.',
+              ],
+              helpfulTip:
+                'Pale clear-yellow urine is usually a quick sign of healthy daily hydration.',
+            },
+            disclaimer:
+              'HealthCopilot stores and visualizes your lab records. Consult your doctor for diagnosis.',
+          }
+        } else {
+          // GENERAL HEALTH / CUSTOM INQUIRY
+          const asksPersonalRecord =
+            normalized.includes('my') ||
+            normalized.includes('me') ||
+            normalized.includes('mine') ||
+            normalized.includes('record') ||
+            normalized.includes('vault') ||
+            normalized.includes('profile') ||
+            normalized.includes('history') ||
+            normalized.includes('result') ||
+            normalized.includes('test')
+
+          if (asksPersonalRecord) {
+            // NEVER invent personal health data when information is not in records
+            assistantMsg = {
+              id: `bot-${Date.now()}`,
+              sender: 'assistant',
+              timestamp: 'Just now',
+              isMissingRecord: true,
+              missingRecordMessage: {
+                heading: L(
+                  "I don't have enough information in your health records to answer that personally.",
+                  "व्यक्तिगत रूप से इसका उत्तर देने के लिए आपके स्वास्थ्य रिकॉर्ड में पर्याप्त जानकारी नहीं है।"
+                ),
+                body: L(
+                  "HealthCopilot only accesses verified documents currently in your records. There is no uploaded document or measurement for this on file. You can upload this report to view personalized insights.",
+                  "HealthCopilot केवल आपके वर्तमान रिकॉर्ड में मौजूद सत्यापित दस्तावेज़ों का संदर्भ लेता है। आपके रिकॉर्ड में इस संबंध में कोई दस्तावेज़ नहीं है। व्यक्तिगत उत्तर पाने के लिए रिपोर्ट अपलोड करें।"
+                ),
+              },
+              generalAnswer: getGeneralGuidance(normalized),
+              disclaimer: L(
+                'HealthCopilot provides health literacy and information. Always consult your doctor for medical advice.',
+                'HealthCopilot स्वास्थ्य जागरूकता और जानकारी प्रदान करता है। चिकित्सा सलाह के लिए हमेशा डॉक्टर से परामर्श करें।'
+              ),
+            }
+          } else {
+            // Purely general educational query
+            assistantMsg = {
+              id: `bot-${Date.now()}`,
+              sender: 'assistant',
+              timestamp: 'Just now',
+              generalAnswer: getGeneralGuidance(normalized),
+              disclaimer: L(
+                'HealthCopilot provides health literacy and information. Always consult your doctor for medical advice.',
+                'HealthCopilot स्वास्थ्य जागरूकता और जानकारी प्रदान करता है। चिकित्सा सलाह के लिए हमेशा डॉक्टर से परामर्श करें।'
+              ),
+            }
+          }
         }
       }
 
@@ -1417,12 +1752,51 @@ export function HealthChat({
 
         <div className="flex items-center gap-2">
           <div className="hidden sm:flex flex-col items-end text-right mr-1">
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal-800 bg-teal-50 px-2.5 py-1 rounded-full border border-teal-200/70 shadow-2xs">
-              <span className="h-2 w-2 rounded-full bg-teal-500 animate-pulse" />
-              {L('Records connected', 'रिकॉर्ड कनेक्टेड')}
-            </span>
-            <span className="text-[11px] text-slate-600 mt-1">
-              {L('CBC tests, 4 medicines & vitals', 'CBC टेस्ट, 4 दवाएँ और विटल्स')}
+            <button
+              type="button"
+              onClick={() => {
+                const nextState = !hasRecords
+                setHasRecords(nextState)
+                if (!nextState) {
+                  setMessages([])
+                  setConversations([])
+                } else {
+                  setConversations(DEFAULT_CONVERSATIONS)
+                }
+                toast(
+                  nextState
+                    ? 'Switched to Demo Account (4 connected records)'
+                    : 'Switched to New User (Empty records state)',
+                  'ok'
+                )
+              }}
+              title={L(
+                'Click to toggle between Demo Records and New User (Empty) state',
+                'डेमो रिकॉर्ड और नए उपयोगकर्ता के बीच स्विच करने के लिए क्लिक करें'
+              )}
+              className={cx(
+                'inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border shadow-2xs transition cursor-pointer',
+                hasRecords
+                  ? 'text-teal-800 bg-teal-50 border-teal-200/70 hover:bg-teal-100'
+                  : 'text-slate-700 bg-slate-100 border-slate-300 hover:bg-slate-200'
+              )}
+            >
+              <span
+                className={cx(
+                  'h-2 w-2 rounded-full',
+                  hasRecords ? 'bg-teal-500 animate-pulse' : 'bg-slate-400'
+                )}
+              />
+              <span>
+                {hasRecords
+                  ? L('Records connected', 'रिकॉर्ड कनेक्टेड')
+                  : L('No records connected', 'कोई रिकॉर्ड कनेक्टेड नहीं')}
+              </span>
+            </button>
+            <span className="text-[11px] text-slate-500 mt-1">
+              {hasRecords
+                ? L('CBC tests, 4 medicines & vitals', 'CBC टेस्ट, 4 दवाएँ और विटल्स')
+                : L('Empty health record · General answers only', 'खाली स्वास्थ्य रिकॉर्ड · केवल सामान्य उत्तर')}
             </span>
           </div>
 
@@ -1452,6 +1826,7 @@ export function HealthChat({
       {/* Welcome State (if no messages yet) */}
       {messages.length === 0 && (
         <div className="py-4 space-y-6">
+          {/* Explanation banner */}
           <div className="rounded-2xl border border-teal-100 bg-gradient-to-r from-teal-50/60 via-sky-50/40 to-white p-4 text-xs text-slate-700 flex items-start gap-3">
             <Info size={16} className="text-teal-600 shrink-0 mt-0.5" />
             <div className="space-y-0.5">
@@ -1467,13 +1842,51 @@ export function HealthChat({
             </div>
           </div>
 
+          {/* If New User / No Data State */}
+          {!hasRecords && (
+            <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/80 p-6 sm:p-8 text-center space-y-3">
+              <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-teal-50 text-teal-700 border border-teal-200/80">
+                <FileText size={22} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-display text-base sm:text-lg font-bold text-slate-900">
+                  {L('Your health record is empty', 'आपका स्वास्थ्य रिकॉर्ड खाली है')}
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+                  {L(
+                    'Upload a medical report, prescription, or diagnostic document to start asking personalized health questions.',
+                    'व्यक्तिगत स्वास्थ्य प्रश्न पूछने के लिए मेडिकल रिपोर्ट, पर्चा या डायग्नोस्टिक दस्तावेज़ अपलोड करें।'
+                  )}
+                </p>
+              </div>
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onNavigate) {
+                      onNavigate('documents')
+                    } else {
+                      toast('Navigating to Documents upload', 'ok')
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs sm:text-sm font-semibold shadow-xs transition cursor-pointer"
+                >
+                  <Upload size={14} />
+                  <span>{L('Upload a document', 'दस्तावेज़ अपलोड करें')}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Quick starter question cards */}
           <div>
             <p className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3">
-              {L('Suggested questions to get started:', 'शुरुआत के लिए सुझाए गए प्रश्न:')}
+              {hasRecords
+                ? L('Suggested questions based on your records:', 'आपके रिकॉर्ड पर आधारित सुझाए गए प्रश्न:')
+                : L('General health questions to get started:', 'शुरुआत के लिए सामान्य स्वास्थ्य प्रश्न:')}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {ACTION_CARDS.map((card) => {
+              {(hasRecords ? ACTION_CARDS : GENERAL_ACTION_CARDS).map((card) => {
                 const Icon = card.icon
                 return (
                   <button
@@ -1509,45 +1922,58 @@ export function HealthChat({
             </div>
           </div>
 
-          {/* Active Vault Records */}
-          <div className="rounded-2xl border border-slate-200/80 bg-white p-4">
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2.5">
-              {L('Connected Health Documents in Vault', 'वॉल्ट में उपलब्ध स्वास्थ्य दस्तावेज़')}
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-              <div className="flex items-center gap-2 rounded-xl bg-slate-50 p-2.5 border border-slate-200/70">
-                <FlaskConical size={16} className="text-teal-600 shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-semibold text-slate-800 truncate">CBC Blood Test</p>
-                  <p className="text-[11px] text-slate-600">07 Oct 2026</p>
-                </div>
+          {/* Connected Health Records (only when user has verified records) */}
+          {hasRecords && (
+            <div className="rounded-2xl border border-slate-200/80 bg-white p-4 space-y-2.5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                  {L('CONNECTED HEALTH RECORDS', 'कनेक्टेड स्वास्थ्य रिकॉर्ड')}
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  {L('Records currently available to HealthCopilot', 'HealthCopilot के पास वर्तमान में उपलब्ध रिकॉर्ड')}
+                </p>
               </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs pt-0.5">
+                <div className="flex items-center gap-2 rounded-xl bg-slate-50 p-2.5 border border-slate-200/70">
+                  <FlaskConical size={16} className="text-teal-600 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-800 truncate">CBC Blood Test</p>
+                    <p className="text-[11px] text-slate-600">07 Oct 2026</p>
+                  </div>
+                </div>
 
-              <div className="flex items-center gap-2 rounded-xl bg-slate-50 p-2.5 border border-slate-200/70">
-                <Pill size={16} className="text-sky-600 shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-semibold text-slate-800 truncate">Prescriptions</p>
-                  <p className="text-[11px] text-slate-600">4 Medicines</p>
+                <div className="flex items-center gap-2 rounded-xl bg-slate-50 p-2.5 border border-slate-200/70">
+                  <Pill size={16} className="text-sky-600 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-800 truncate">Prescriptions</p>
+                    <p className="text-[11px] text-slate-600">4 Medicines</p>
+                  </div>
                 </div>
-              </div>
 
-              <div className="flex items-center gap-2 rounded-xl bg-slate-50 p-2.5 border border-slate-200/70">
-                <Heart size={16} className="text-rose-600 shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-semibold text-slate-800 truncate">Blood Pressure</p>
-                  <p className="text-[11px] text-slate-600">118/76 mmHg</p>
+                <div className="flex items-center gap-2 rounded-xl bg-slate-50 p-2.5 border border-slate-200/70">
+                  <Heart size={16} className="text-rose-600 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-800 truncate">Blood Pressure</p>
+                    <p className="text-[11px] text-slate-600">118/76 mmHg</p>
+                  </div>
                 </div>
-              </div>
 
-              <div className="flex items-center gap-2 rounded-xl bg-slate-50 p-2.5 border border-slate-200/70">
-                <Activity size={16} className="text-amber-600 shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-semibold text-slate-800 truncate">Blood Sugar</p>
-                  <p className="text-[11px] text-slate-600">118 mg/dL fasting</p>
+                <div className="flex items-center gap-2 rounded-xl bg-slate-50 p-2.5 border border-slate-200/70">
+                  <Activity size={16} className="text-amber-600 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-800 truncate">Blood Sugar</p>
+                    <p className="text-[11px] text-slate-600">118 mg/dL fasting</p>
+                  </div>
                 </div>
               </div>
+              <p className="text-[10.5px] text-slate-400">
+                {L(
+                  'Note: Records reflect uploaded diagnostic documents and prescriptions on file.',
+                  'नोट: रिकॉर्ड फ़ाइल में उपलब्ध डायग्नोस्टिक दस्तावेज़ों और पर्चों को दर्शाते हैं।'
+                )}
+              </p>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -1694,6 +2120,44 @@ export function HealthChat({
                 </span>
 
                 <div className="flex-1 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-xs">
+                  {/* MISSING RECORD / NOT IN YOUR RECORDS */}
+                  {msg.isMissingRecord && msg.missingRecordMessage && (
+                    <div className="p-5 border-b border-slate-100 bg-amber-50/30 space-y-3.5">
+                      <div className="flex items-center justify-between">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold tracking-wider uppercase bg-amber-100 text-amber-900 border border-amber-200/80">
+                          <AlertTriangle size={12} className="text-amber-700" />
+                          <span>{L('NOT IN YOUR RECORDS', 'आपके रिकॉर्ड में नहीं')}</span>
+                        </span>
+                        <span className="text-[11px] text-slate-600">{msg.timestamp}</span>
+                      </div>
+
+                      <h3 className="text-[15px] sm:text-base font-bold text-slate-900 leading-snug">
+                        {msg.missingRecordMessage.heading}
+                      </h3>
+
+                      <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                        {msg.missingRecordMessage.body}
+                      </p>
+
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onNavigate) {
+                              onNavigate('documents')
+                            } else {
+                              toast('Navigating to Documents', 'ok')
+                            }
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shadow-2xs transition cursor-pointer"
+                        >
+                          <Upload size={13} />
+                          <span>{L('Upload a document', 'दस्तावेज़ अपलोड करें')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* TYPE 1: BASED ON YOUR RECORDS */}
                   {msg.recordAnswer && (
                     <div className="p-5 border-b border-slate-100 space-y-4">
@@ -1785,17 +2249,19 @@ export function HealthChat({
                               key={i}
                               type="button"
                               onClick={() => {
-                                if (src.regionKey) {
+                                if (src.targetView && onNavigate) {
+                                  onNavigate(src.targetView, src.targetExtra)
+                                } else if (src.regionKey) {
                                   ev({ kind: src.kind === 'rx' ? 'rx' : 'cbc', region: src.regionKey })
                                 } else {
                                   toast(`Viewing record: ${src.title}`)
                                 }
                               }}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-teal-50/70 border border-slate-200 hover:border-teal-300 text-slate-800 hover:text-teal-900 text-xs font-medium transition cursor-pointer shadow-2xs"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-900 text-xs font-semibold transition cursor-pointer shadow-2xs group"
                             >
-                              <FileText size={12} className="text-teal-600 shrink-0" />
-                              <span>Source: {src.title} · {src.date}</span>
-                              <ExternalLink size={11} className="text-slate-600" />
+                              <FileText size={12} className="text-teal-700 shrink-0" />
+                              <span>{L('View source', 'स्रोत देखें')}: {src.title} · {src.date}</span>
+                              <ExternalLink size={11} className="text-teal-600 group-hover:translate-x-0.5 transition-transform" />
                             </button>
                           ))}
                         </div>

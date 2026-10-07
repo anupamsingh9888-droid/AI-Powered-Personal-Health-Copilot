@@ -27,13 +27,16 @@ const activity: { date: string; type: string; title: string; note: string; s: St
   { date: 'SEP 12', type: 'Discharge Summary', title: 'Hospital visit recorded', note: 'City General Hospital', s: 'neutral', sl: 'Recorded', i: Hospital },
 ]
 
-export function Home({ go }: { go: Go }) {
+export function Home({ go, user }: { go: Go; user?: { name: string } }) {
   const L = useL()
   const ev = useEvidence()
+  const userName = user?.name ? user.name.split(' ')[0] : 'Alex'
   return (
     <div className="anim-fade-up mx-auto max-w-6xl space-y-8">
       <div>
-        <h1 className="font-display text-[34px] font-semibold leading-tight tracking-[-.025em] md:text-[44px]">{L('Good morning, Alex', 'सुप्रभात, Alex')}</h1>
+        <h1 className="font-display text-[34px] font-semibold leading-tight tracking-[-.025em] md:text-[44px]">
+          {L(`Good morning, ${userName}`, `सुप्रभात, ${userName}`)}
+        </h1>
         <p className="mt-2 text-[16px] text-slate-500">{L("Here's what's happening with your health.", 'आपके स्वास्थ्य की ताज़ा जानकारी।')}</p>
       </div>
 
@@ -63,7 +66,8 @@ export function Home({ go }: { go: Go }) {
               Your recent records show that your blood test was completed 3 days ago. One value is outside the reference range shown on the report and may be worth discussing with your healthcare professional.
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-3">
-              <Btn onClick={() => go('summary')}>{L('View detailed insight', 'विस्तृत जानकारी देखें')}<ArrowRight size={16} /></Btn>
+              <Btn onClick={() => go('chat')}>{L('Ask Health Copilot', 'हेल्थ कॉपायलट से पूछें')}<ArrowRight size={16} /></Btn>
+              <Btn v="secondary" onClick={() => go('summary')}>{L('View detailed insight', 'विस्तृत जानकारी देखें')}</Btn>
               <button onClick={() => ev({ kind: 'cbc', region: 'hb' })} className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-800 hover:underline"><Link2 size={14} />See source evidence</button>
             </div>
           </div>
@@ -367,8 +371,18 @@ export function Medications() {
 }
 
 /* ================= Profile ================= */
-export function Profile() {
+export function Profile({ user, onLogout }: { user?: { name: string; email: string; avatarChar: string; abhaId?: string; age?: string; gender?: string; height?: string; heightUnit?: string; weight?: string; weightUnit?: string; bloodGroup?: string }; onLogout?: () => void }) {
   const L = useL()
+  const currentName = user?.name || 'Alex Rao'
+  const currentEmail = user?.email || 'alex.rao@email.com'
+  const currentAvatar = user?.avatarChar || currentName.charAt(0)
+  const currentAbha = user?.abhaId || '91-4820-1928-3341'
+  const currentAge = user?.age || '34'
+  const currentGender = user?.gender || 'Male'
+  const currentHeight = user?.height ? `${user.height} ${user.heightUnit || 'cm'}` : '178 cm'
+  const currentWeight = user?.weight ? `${user.weight} ${user.weightUnit || 'kg'}` : '68 kg'
+  const currentBloodGroup = user?.bloodGroup || 'O positive'
+
   const res = [
     ['Patient', 'Name, birth date, blood group', 1],
     ['MedicationRequest', 'Prescribed medicines', 4],
@@ -378,17 +392,31 @@ export function Profile() {
   ] as const
   return (
     <div className="anim-fade-up mx-auto max-w-5xl space-y-6">
-      <PageHead title={L('Health Profile', 'स्वास्थ्य प्रोफ़ाइल')} sub="Your personal details and everything HealthLens has structured from your documents." />
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <PageHead title={L('Health Profile', 'स्वास्थ्य प्रोफ़ाइल')} sub="Your personal details and everything AI Copilot has structured from your documents." />
+        {onLogout && (
+          <Btn v="secondary" sm onClick={onLogout} className="text-slate-600 hover:text-rose-600 hover:border-rose-200">
+            {L('Sign Out', 'साइन आउट')}
+          </Btn>
+        )}
+      </div>
       <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <Card className="p-6">
           <div className="mb-6 flex items-center gap-4">
-            <span className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-sky-400 to-teal-500 font-display text-2xl font-semibold text-white">A</span>
-            <div><p className="font-display text-xl font-semibold">Alex Rao</p><p className="text-sm text-slate-500">alex.rao@email.com</p></div>
+            <span className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-sky-400 to-teal-500 font-display text-2xl font-semibold text-white">{currentAvatar}</span>
+            <div><p className="font-display text-xl font-semibold">{currentName}</p><p className="text-sm text-slate-500">{currentEmail}</p></div>
           </div>
-          <Eyebrow className="mb-3">Personal information</Eyebrow>
+          <Eyebrow className="mb-3">Personal & Physiological Profile</Eyebrow>
           <dl className="divide-y divide-slate-100 text-sm">
-            {[['Name', 'Alex Rao'], ['Date of birth', '14 Mar 1992'], ['Blood group', 'O positive']].map(([k, v]) => (
-              <div key={k} className="flex justify-between py-3"><dt className="text-slate-500">{k}</dt><dd className="font-medium">{v}</dd></div>
+            {[
+              ['Name', currentName],
+              ['Age', `${currentAge} years`],
+              ['Gender', currentGender],
+              ['Height', currentHeight],
+              ['Weight', currentWeight],
+              ['Blood group', currentBloodGroup],
+            ].map(([k, v]) => (
+              <div key={k} className="flex justify-between py-2.5"><dt className="text-slate-500">{k}</dt><dd className="font-medium text-slate-900">{v}</dd></div>
             ))}
           </dl>
         </Card>

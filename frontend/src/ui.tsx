@@ -18,10 +18,10 @@ export const EvidenceCtx = createContext<(t: EvidenceTarget) => void>(() => {})
 export const useEvidence = () => useContext(EvidenceCtx)
 
 /* ---------- logo ---------- */
-export function Logo({ size = 32, word = false, dark = false }: { size?: number; word?: boolean; dark?: boolean }) {
+export function Logo({ size = 32, word = false, dark = false, compact = false }: { size?: number; word?: boolean; dark?: boolean; compact?: boolean }) {
   return (
     <span className="inline-flex items-center gap-2.5">
-      <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-label="HealthLens">
+      <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-label="AI-Powered Personal Health Copilot" className="shrink-0">
         <defs>
           <linearGradient id="hl-bg" x1="0" y1="0" x2="32" y2="32">
             <stop stopColor="#14325c" />
@@ -37,8 +37,13 @@ export function Logo({ size = 32, word = false, dark = false }: { size?: number;
         <path d="M9.5 16H13l1.6-3.6 2.8 7.2 1.6-3.6h3.5" stroke="url(#hl-pulse)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
       {word && (
-        <span className={cx('font-display text-[19px] font-semibold tracking-tight', dark ? 'text-white' : 'text-foreground')}>
-          Health<span className="text-teal-600">Lens</span>
+        <span className="flex flex-col leading-tight">
+          <span className={cx('font-display text-[15px] font-bold tracking-tight', dark ? 'text-white' : 'text-[#0f3057]')}>
+            Health<span className="text-teal-600">Copilot</span>
+          </span>
+          <span className={cx('text-[9.5px] font-semibold uppercase tracking-wider', dark ? 'text-teal-300' : 'text-slate-500')}>
+            AI Health Copilot
+          </span>
         </span>
       )}
     </span>

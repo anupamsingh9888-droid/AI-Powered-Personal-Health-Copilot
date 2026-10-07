@@ -106,23 +106,23 @@ export function ConfBar({ value, className }: { value: number; className?: strin
 /* ---------- buttons / cards ---------- */
 type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & { v?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'ai'; sm?: boolean }
 export function Btn({ v = 'primary', sm, className, ...p }: BtnProps) {
-  const base = 'inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-all duration-200 active:scale-[.98] disabled:opacity-45 disabled:pointer-events-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500'
+  const base = 'inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-all duration-200 active:scale-[.98] disabled:opacity-40 disabled:pointer-events-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 cursor-pointer'
   const vs = {
-    primary: 'bg-[#0f3057] text-white shadow-sm hover:bg-[#0b2547] hover:shadow-md',
-    secondary: 'bg-white text-foreground ring-1 ring-inset ring-slate-200 hover:bg-slate-50 hover:ring-slate-300',
-    ghost: 'text-slate-600 hover:bg-slate-100',
+    primary: 'bg-[#0f3057] text-white shadow-xs hover:bg-[#0b2444] hover:shadow-sm',
+    secondary: 'bg-white text-slate-800 ring-1 ring-inset ring-slate-200/90 hover:bg-slate-50/80 hover:ring-slate-300 shadow-2xs',
+    ghost: 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80',
     danger: 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200 hover:bg-rose-100',
-    ai: 'bg-white/80 text-violet-800 ring-1 ring-inset ring-violet-200 hover:bg-white backdrop-blur',
+    ai: 'bg-white text-violet-800 ring-1 ring-inset ring-violet-200/80 hover:bg-violet-50/50 shadow-2xs',
   }
   return <button {...p} className={cx(base, vs[v], sm ? 'h-8 px-3 text-[13px]' : 'h-10 px-4 text-sm', className)} />
 }
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cx('rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,.04)]', className)}>{children}</div>
+  return <div className={cx('rounded-2xl border border-slate-200/75 bg-white shadow-xs transition-shadow', className)}>{children}</div>
 }
 
 export function Eyebrow({ children, className }: { children: ReactNode; className?: string }) {
-  return <p className={cx('text-[11px] font-semibold uppercase tracking-[.09em] text-slate-400', className)}>{children}</p>
+  return <p className={cx('text-xs font-semibold uppercase tracking-wider text-slate-600', className)}>{children}</p>
 }
 
 export function PageHead({ title, sub, children }: { title: string; sub: string; children?: ReactNode }) {

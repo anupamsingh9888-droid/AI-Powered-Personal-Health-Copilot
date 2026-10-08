@@ -48,8 +48,12 @@ import {
   getMedicalDocuments,
   updateDocumentProcessingStatus,
   deleteMedicalDocument,
+  executeOcrPipeline,
+  getDocumentStructuredData,
+  updateStructuredDataReview,
   type MedicalDocument,
   type ProcessingStatus,
+  type StructuredMedicalData,
 } from './services/medicalDocumentService'
 
 /* ================= Evidence drawer ================= */

@@ -48,6 +48,14 @@ import {
   updateMedicalDocumentStatus,
   deleteMedicalDocument,
 } from '../db/queries/medicalDocuments.ts'
+import {
+  runOcrPipeline,
+} from '../services/ocrPipeline.ts'
+import {
+  getStructuredMedicalDataByDocument,
+  getAllStructuredMedicalData,
+  updateStructuredDataReview,
+} from '../db/queries/structuredMedicalData.ts'
 
 function sendJson(res: ServerResponse, status: number, data: any) {
   res.statusCode = status
@@ -458,6 +466,122 @@ export async function handleApiRoute(
         sendJson(res, 200, { success: true })
         return true
       }
+    }
+
+    // 11. OCR-to-Structured-Medical-Data Pipeline Routes (OCR -> Gemini -> Structured JSON -> PostgreSQL)
+    if (pathname === '/api/pipeline/ocr-to-structured' && method === 'POST') {
+      const body = await parseBody(req)
+      const rawOcrText = body.rawOcrText || body.rawText || ''
+      if (!rawOcrText || typeof rawOcrText !== 'string' || rawOcrText.trim().length === 0) {
+        sendJson(res, 400, {
+          error: 'rawOcrText is required and must not be empty.',
+        })
+        return true
+      }
+
+      let docId = Number(body.documentId)
+      // If no document exists yet, auto-create a linked document record
+      if (!docId || isNaN(docId)) {
+        const createdDoc = await createMedicalDocument(userId, {
+          title: body.title || body.originalFilename || 'Uploaded OCR Document',
+          docType: body.docType || body.documentType || 'General Medical',
+          originalFilename: body.originalFilename || 'document.pdf',
+          processingStatus: 'PROCESSING',
+        })
+        docId = Number(createdDoc.documentId)
+      }
+
+      const result = await runOcrPipeline({
+        documentId: docId,
+        userId,
+        rawOcrText,
+        ocrConfidence:
+          body.ocrConfidence !== undefined && body.ocrConfidence !== null
+            ? Number(body.ocrConfidence)
+            : null,
+        documentType: body.docType || body.documentType,
+        originalFilename: body.originalFilename,
+      })
+
+      sendJson(res, 200, result)
+      return true
+    }
+
+    // Fetch structured data linked to a specific document
+    const docStructuredMatch = pathname.match(
+      /^\/api\/(?:medical-documents|documents)\/(\d+)\/structured$/
+    )
+    if (docStructuredMatch && method === 'GET') {
+      const docId = parseInt(docStructuredMatch[1], 10)
+      const data = await getStructuredMedicalDataByDocument(userId, docId)
+      if (!data) {
+        sendJson(res, 404, {
+          error: 'Structured data not found for this document.',
+        })
+        return true
+      }
+      sendJson(res, 200, data)
+      return true
+    }
+
+    // Trigger OCR pipeline for an existing document
+    const docProcessOcrMatch = pathname.match(
+      /^\/api\/(?:medical-documents|documents)\/(\d+)\/process-ocr$/
+    )
+    if (docProcessOcrMatch && method === 'POST') {
+      const docId = parseInt(docProcessOcrMatch[1], 10)
+      const existingDoc = await getMedicalDocumentById(userId, docId)
+      if (!existingDoc) {
+        sendJson(res, 404, { error: 'Document not found.' })
+        return true
+      }
+
+      const body = await parseBody(req)
+      const rawOcrText = body.rawOcrText || body.rawText || ''
+      if (!rawOcrText) {
+        sendJson(res, 400, {
+          error: 'rawOcrText is required to process document.',
+        })
+        return true
+      }
+
+      const result = await runOcrPipeline({
+        documentId: docId,
+        userId,
+        rawOcrText,
+        ocrConfidence:
+          body.ocrConfidence !== undefined && body.ocrConfidence !== null
+            ? Number(body.ocrConfidence)
+            : null,
+        documentType: existingDoc.docType,
+        originalFilename: existingDoc.originalFilename || existingDoc.fileName,
+      })
+
+      sendJson(res, 200, result)
+      return true
+    }
+
+    // List all structured medical data records in PostgreSQL for user
+    if (pathname === '/api/structured-data' && method === 'GET') {
+      const allData = await getAllStructuredMedicalData(userId)
+      sendJson(res, 200, allData)
+      return true
+    }
+
+    // Review & confirm structured medical data
+    const reviewMatch = pathname.match(/^\/api\/structured-data\/(\d+)\/review$/)
+    if (reviewMatch && (method === 'PATCH' || method === 'POST')) {
+      const sId = parseInt(reviewMatch[1], 10)
+      const body = await parseBody(req)
+      const reviewStatus = body.reviewStatus || 'VERIFIED'
+      const updated = await updateStructuredDataReview(
+        userId,
+        sId,
+        reviewStatus,
+        body.updatedFields
+      )
+      sendJson(res, 200, updated)
+      return true
     }
 
     sendJson(res, 404, { error: 'API endpoint not found' })

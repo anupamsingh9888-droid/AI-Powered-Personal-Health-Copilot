@@ -92,6 +92,37 @@ export const ocrResults = pgTable('ocr_results', {
   processedAt: timestamp('processed_at', { withTimezone: true }).defaultNow(),
 })
 
+// 5b. Structured Medical Data (OCR -> Gemini -> PostgreSQL pipeline)
+export const structuredMedicalData = pgTable('structured_medical_data', {
+  id: serial('id').primaryKey(),
+  documentId: integer('document_id')
+    .references(() => medicalDocuments.id, { onDelete: 'cascade' })
+    .notNull(),
+  userId: text('user_id')
+    .references(() => users.uid, { onDelete: 'cascade' })
+    .notNull(),
+  ocrResultId: integer('ocr_result_id').references(() => ocrResults.id, {
+    onDelete: 'set null',
+  }),
+  rawOcrText: text('raw_ocr_text').notNull(),
+  ocrConfidence: numeric('ocr_confidence', { precision: 5, scale: 4 }),
+  patientName: text('patient_name'),
+  documentDate: text('document_date'),
+  doctorName: text('doctor_name'),
+  diagnosesMentioned: jsonb('diagnoses_mentioned').default([]),
+  medications: jsonb('medications').default([]),
+  laboratoryTests: jsonb('laboratory_tests').default([]),
+  uncertainFields: jsonb('uncertain_fields').default([]),
+  requiresReview: boolean('requires_review').default(false),
+  reviewStatus: text('review_status').default('PENDING_REVIEW'),
+  clinicalDisclaimer: text('clinical_disclaimer').default(
+    'Not a confirmed medical diagnosis. Information extracted from document text for informational reference only. Consult your doctor.'
+  ),
+  structuredJson: jsonb('structured_json').default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+})
+
 // 6. Medications
 export const medications = pgTable('medications', {
   id: serial('id').primaryKey(),
@@ -248,7 +279,29 @@ export const medicalDocumentsRelations = relations(medicalDocuments, ({ one }) =
     fields: [medicalDocuments.id],
     references: [ocrResults.documentId],
   }),
+  structuredData: one(structuredMedicalData, {
+    fields: [medicalDocuments.id],
+    references: [structuredMedicalData.documentId],
+  }),
 }))
+
+export const structuredMedicalDataRelations = relations(
+  structuredMedicalData,
+  ({ one }) => ({
+    document: one(medicalDocuments, {
+      fields: [structuredMedicalData.documentId],
+      references: [medicalDocuments.id],
+    }),
+    user: one(users, {
+      fields: [structuredMedicalData.userId],
+      references: [users.uid],
+    }),
+    ocrResult: one(ocrResults, {
+      fields: [structuredMedicalData.ocrResultId],
+      references: [ocrResults.id],
+    }),
+  })
+)
 
 export const labReportsRelations = relations(labReports, ({ one, many }) => ({
   user: one(users, {

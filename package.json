@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=frontend",
-    "build": "npm run build --workspace=frontend && rm -rf frontend/dist && cp -r dist frontend/dist",
+    "build": "npm run build --workspace=frontend && rm -rf frontend/dist && cp -r dist frontend/dist && cp dist/index.html dist/404.html && cp dist/index.html frontend/dist/404.html && touch dist/.nojekyll && touch frontend/dist/.nojekyll",
     "start": "node server.ts",
     "preview": "npm run preview --workspace=frontend",
     "lint": "npm run lint --workspace=frontend"

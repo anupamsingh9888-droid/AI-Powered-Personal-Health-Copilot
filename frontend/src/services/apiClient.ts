@@ -1,5 +1,11 @@
 import { auth } from '../lib/firebase'
 
+const API_BASE = (
+  (import.meta.env.VITE_API_URL as string | undefined) ||
+  (import.meta.env.VITE_API_BASE as string | undefined) ||
+  ''
+).replace(/\/$/, '')
+
 export async function getAuthToken(): Promise<string> {
   if (auth.currentUser) {
     try {
@@ -33,7 +39,11 @@ export async function apiRequest<T = any>(
     headers.set('Content-Type', 'application/json')
   }
 
-  const res = await fetch(endpoint, {
+  const targetUrl = endpoint.startsWith('http')
+    ? endpoint
+    : `${API_BASE}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
+
+  const res = await fetch(targetUrl, {
     ...options,
     headers,
   })

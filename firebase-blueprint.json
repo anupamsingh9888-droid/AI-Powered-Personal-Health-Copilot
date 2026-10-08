@@ -1,0 +1,439 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account and profile information",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "User display name",
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address",
+          "maxLength": 200
+        },
+        "avatarChar": {
+          "type": "string",
+          "description": "Single character avatar",
+          "maxLength": 5
+        },
+        "role": {
+          "type": "string",
+          "description": "Account role or type",
+          "maxLength": 50
+        },
+        "abhaId": {
+          "type": "string",
+          "description": "Indian ABHA Health ID",
+          "maxLength": 50
+        },
+        "onboarded": {
+          "type": "boolean",
+          "description": "Whether onboarding has been completed"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp ISO"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp ISO"
+        }
+      },
+      "required": ["userId", "name", "email"]
+    },
+    "HealthProfile": {
+      "title": "HealthProfile",
+      "description": "User biometric data and clinical profile",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "fullName": {
+          "type": "string",
+          "description": "Full name",
+          "maxLength": 100
+        },
+        "age": {
+          "type": "string",
+          "description": "Age in years",
+          "maxLength": 10
+        },
+        "gender": {
+          "type": "string",
+          "description": "Gender",
+          "maxLength": 30
+        },
+        "height": {
+          "type": "string",
+          "description": "Height measurement",
+          "maxLength": 10
+        },
+        "heightUnit": {
+          "type": "string",
+          "description": "Height unit (cm or ft)",
+          "maxLength": 10
+        },
+        "weight": {
+          "type": "string",
+          "description": "Weight measurement",
+          "maxLength": 10
+        },
+        "weightUnit": {
+          "type": "string",
+          "description": "Weight unit (kg or lbs)",
+          "maxLength": 10
+        },
+        "bloodGroup": {
+          "type": "string",
+          "description": "Blood group",
+          "maxLength": 10
+        },
+        "bmi": {
+          "type": "number",
+          "description": "Calculated BMI value"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp ISO"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp ISO"
+        }
+      },
+      "required": ["userId"]
+    },
+    "HealthRecord": {
+      "title": "HealthRecord",
+      "description": "Clinical health records, visits and timeline milestones",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Record title",
+          "maxLength": 200
+        },
+        "category": {
+          "type": "string",
+          "description": "Record category (visit, prescription, lab)",
+          "maxLength": 50
+        },
+        "date": {
+          "type": "string",
+          "description": "Record date",
+          "maxLength": 50
+        },
+        "doctor": {
+          "type": "string",
+          "description": "Doctor name or clinic",
+          "maxLength": 100
+        },
+        "notes": {
+          "type": "string",
+          "description": "Record clinical notes",
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp ISO"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp ISO"
+        }
+      },
+      "required": ["userId", "title"]
+    },
+    "Medication": {
+      "title": "Medication",
+      "description": "Prescribed medications and daily schedule",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Medication brand / generic name",
+          "maxLength": 150
+        },
+        "dose": {
+          "type": "string",
+          "description": "Dosage (e.g. 500 mg)",
+          "maxLength": 50
+        },
+        "timing": {
+          "type": "string",
+          "description": "Daily timing schedule",
+          "maxLength": 100
+        },
+        "instructions": {
+          "type": "string",
+          "description": "Administration instructions",
+          "maxLength": 500
+        },
+        "takenToday": {
+          "type": "boolean",
+          "description": "Adherence status taken"
+        },
+        "skippedToday": {
+          "type": "boolean",
+          "description": "Adherence status skipped"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp ISO"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp ISO"
+        }
+      },
+      "required": ["userId", "name"]
+    },
+    "LabReport": {
+      "title": "LabReport",
+      "description": "Diagnostic and laboratory test reports",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "testName": {
+          "type": "string",
+          "description": "Name of diagnostic test",
+          "maxLength": 150
+        },
+        "date": {
+          "type": "string",
+          "description": "Report test date",
+          "maxLength": 50
+        },
+        "labName": {
+          "type": "string",
+          "description": "Laboratory facility",
+          "maxLength": 150
+        },
+        "status": {
+          "type": "string",
+          "description": "Test status (Normal, Flagged, Pending)",
+          "maxLength": 50
+        },
+        "notes": {
+          "type": "string",
+          "description": "Report summary notes",
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp ISO"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp ISO"
+        }
+      },
+      "required": ["userId", "testName"]
+    },
+    "Symptom": {
+      "title": "Symptom",
+      "description": "Logged patient symptoms and severity",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Symptom description or label",
+          "maxLength": 150
+        },
+        "severity": {
+          "type": "string",
+          "description": "Severity level (Mild, Moderate, Severe)",
+          "maxLength": 30
+        },
+        "notes": {
+          "type": "string",
+          "description": "Symptom context",
+          "maxLength": 1000
+        },
+        "date": {
+          "type": "string",
+          "description": "Occurrence date",
+          "maxLength": 50
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp ISO"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp ISO"
+        }
+      },
+      "required": ["userId", "name"]
+    },
+    "ChatSession": {
+      "title": "ChatSession",
+      "description": "Health copilot conversational thread",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Session topic summary",
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp ISO"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp ISO"
+        }
+      },
+      "required": ["userId", "title"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Individual message inside a chat session",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "ID of parent ChatSession",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "sender": {
+          "type": "string",
+          "description": "user or assistant",
+          "maxLength": 20
+        },
+        "text": {
+          "type": "string",
+          "description": "Message content",
+          "maxLength": 5000
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Formatted display timestamp",
+          "maxLength": 50
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp ISO"
+        }
+      },
+      "required": ["sessionId", "userId", "sender", "text"]
+    },
+    "HealthInsight": {
+      "title": "HealthInsight",
+      "description": "Personalized health recommendations and risk alerts",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Insight title",
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed recommendation or alert body",
+          "maxLength": 2000
+        },
+        "type": {
+          "type": "string",
+          "description": "Type: alert, food, exercise, vital",
+          "maxLength": 50
+        },
+        "priority": {
+          "type": "string",
+          "description": "Priority: high, medium, low",
+          "maxLength": 20
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp ISO"
+        }
+      },
+      "required": ["userId", "title", "description"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents keyed by Auth UID"
+    },
+    "/healthProfiles/{profileId}": {
+      "schema": "HealthProfile",
+      "description": "Biometric profiles isolated by userId"
+    },
+    "/healthRecords/{recordId}": {
+      "schema": "HealthRecord",
+      "description": "Clinical encounters and milestones isolated by userId"
+    },
+    "/medications/{medicationId}": {
+      "schema": "Medication",
+      "description": "Active prescriptions isolated by userId"
+    },
+    "/labReports/{reportId}": {
+      "schema": "LabReport",
+      "description": "Diagnostic reports isolated by userId"
+    },
+    "/symptoms/{symptomId}": {
+      "schema": "Symptom",
+      "description": "Symptom logs isolated by userId"
+    },
+    "/chatSessions/{sessionId}": {
+      "schema": "ChatSession",
+      "description": "AI consultation sessions isolated by userId"
+    },
+    "/chatMessages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Chat transcript items isolated by userId and sessionId"
+    },
+    "/healthInsights/{insightId}": {
+      "schema": "HealthInsight",
+      "description": "Personalized advice and alerts isolated by userId"
+    }
+  }
+}

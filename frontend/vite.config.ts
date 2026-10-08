@@ -26,6 +26,7 @@ react(),
       figmaErrorOverlayReplay(),
       figmaReactRefreshBoundaryFallback(),
       figmaMakeKitPlugin({ storiesGlob: '/src/**/*.stories.{ts,tsx,js,jsx}' }),
+      cloudsqlApiPlugin(),
     ],
     resolve: {
       alias: {
@@ -362,3 +363,26 @@ function figmaMakeKitPlugin(options: { storiesGlob: string | string[] }): Plugin
     },
   }
 }
+
+/** Handles /api/* endpoints via Cloud SQL PostgreSQL router in Vite dev server */
+function cloudsqlApiPlugin(): Plugin {
+  return {
+    name: 'cloudsql-api-router',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const url = req.url || ''
+        if (url.startsWith('/api/')) {
+          try {
+            const { handleApiRoute } = await import('../src/api/router.ts')
+            const handled = await handleApiRoute(req, res)
+            if (handled) return
+          } catch (err) {
+            console.error('Vite Cloud SQL API handler error:', err)
+          }
+        }
+        next()
+      })
+    },
+  }
+}
+

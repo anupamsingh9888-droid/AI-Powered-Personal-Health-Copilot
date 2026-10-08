@@ -42,6 +42,11 @@ import {
   INITIAL_ALERTS,
 } from './data/healthData'
 import type { ConditionInfo, Appointment, MedicationItem, HealthAlert, HealthConditionId } from './types'
+import { auth } from './lib/firebase'
+import { subscribeToAuthChanges, signOutUser, syncUserToFirestore } from './services/authService'
+import { getHealthProfile, saveHealthProfile } from './services/healthProfileService'
+import { getMedications, seedInitialMedications, updateMedicationAdherence } from './services/medicationService'
+import { createHealthRecord } from './services/healthRecordService'
 
 export interface HealthNotification {
   id: string
@@ -205,6 +210,49 @@ export default function App() {
     return () => clearTimeout(id)
   }, [toast])
 
+  // Synchronize with Firebase Auth and Firestore user data
+  useEffect(() => {
+    const unsubscribe = subscribeToAuthChanges(async (fbUser) => {
+      if (fbUser) {
+        try {
+          const syncedUser = await syncUserToFirestore(fbUser)
+          const profile = await getHealthProfile(fbUser.uid)
+          if (profile) {
+            syncedUser.name = profile.fullName || syncedUser.name
+            syncedUser.age = profile.age || syncedUser.age
+            syncedUser.gender = (profile.gender as any) || syncedUser.gender
+            syncedUser.height = profile.height || syncedUser.height
+            syncedUser.heightUnit = (profile.heightUnit as any) || syncedUser.heightUnit
+            syncedUser.weight = profile.weight || syncedUser.weight
+            syncedUser.weightUnit = (profile.weightUnit as any) || syncedUser.weightUnit
+            syncedUser.bloodGroup = (profile.bloodGroup as any) || syncedUser.bloodGroup
+            syncedUser.dateOfBirth = profile.dateOfBirth || syncedUser.dateOfBirth
+            syncedUser.emergencyContact = profile.emergencyContact || syncedUser.emergencyContact
+            syncedUser.allergies = profile.allergies || syncedUser.allergies
+            syncedUser.existingConditions = profile.existingConditions || syncedUser.existingConditions
+            syncedUser.currentMedications = profile.currentMedications || syncedUser.currentMedications
+            syncedUser.onboarded = true
+          }
+          setUser(syncedUser)
+          try {
+            localStorage.setItem('health_copilot_user', JSON.stringify(syncedUser))
+          } catch {}
+
+          // Load or seed user medications from Firestore
+          const firestoreMeds = await getMedications(fbUser.uid)
+          if (firestoreMeds && firestoreMeds.length > 0) {
+            setMedications(firestoreMeds)
+          } else {
+            await seedInitialMedications(fbUser.uid, INITIAL_MEDICATIONS)
+          }
+        } catch (err) {
+          console.error('Firebase Auth/Firestore sync error:', err)
+        }
+      }
+    })
+    return () => unsubscribe()
+  }, [])
+
   const handleLoginSuccess = (profile: UserProfile) => {
     const needsOnboarding = !profile.onboarded
     setUser(profile)
@@ -220,7 +268,7 @@ export default function App() {
     }
   }
 
-  const handleOnboardingComplete = (data: PersonalHealthData) => {
+  const handleOnboardingComplete = async (data: PersonalHealthData) => {
     if (!user) return
     const updatedUser: UserProfile = {
       ...user,
@@ -240,11 +288,26 @@ export default function App() {
     try {
       localStorage.setItem('health_copilot_user', JSON.stringify(updatedUser))
     } catch {}
+
+    if (auth.currentUser) {
+      try {
+        await saveHealthProfile(auth.currentUser.uid, data)
+        await syncUserToFirestore(auth.currentUser)
+      } catch (err) {
+        console.error('Failed to save profile to Firestore:', err)
+      }
+    }
+
     setShowOnboarding(false)
     setToast({ msg: `Profile personalized for ${updatedUser.name}! Dashboard updated.`, tone: 'ok', k: Date.now() })
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await signOutUser()
+    } catch (err) {
+      console.warn('Firebase signout error:', err)
+    }
     setUser(null)
     try {
       localStorage.removeItem('health_copilot_user')
@@ -260,6 +323,13 @@ export default function App() {
     setMedications((prev) =>
       prev.map((m) => {
         if (m.id !== id) return m
+        const taken = action === 'taken'
+        const skipped = action === 'skip'
+        if (auth.currentUser) {
+          updateMedicationAdherence(m.id, taken, skipped).catch((err) =>
+            console.error('Failed to update medication adherence in Firestore:', err)
+          )
+        }
         if (action === 'taken') {
           return { ...m, takenToday: true, skippedToday: false }
         } else if (action === 'skip') {
@@ -279,6 +349,16 @@ export default function App() {
       ...aptData,
     }
     setAppointments((prev) => [newApt, ...prev.filter((a) => a.id !== newApt.id)])
+
+    if (auth.currentUser) {
+      createHealthRecord(auth.currentUser.uid, {
+        title: `Appointment with ${newApt.doctorName}`,
+        category: 'visit',
+        date: `${newApt.date} ${newApt.time}`,
+        doctor: newApt.doctorName,
+        notes: `${newApt.clinic}. Notes: ${newApt.notes || 'None'}. Status: ${newApt.status}`,
+      }).catch((err) => console.error('Failed to create health record in Firestore:', err))
+    }
     // Update dashboard alert
     setAlerts((prev) => [
       {

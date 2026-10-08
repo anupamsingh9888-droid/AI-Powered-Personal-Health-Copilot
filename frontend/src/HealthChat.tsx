@@ -29,6 +29,8 @@ import {
   Upload,
 } from 'lucide-react'
 import { Btn, cx, useL, useEvidence, useToast } from './ui'
+import { auth } from './lib/firebase'
+import { createChatSession, sendChatMessage, deleteChatSession } from './services/chatService'
 
 export interface MessageSource {
   title: string
@@ -913,6 +915,22 @@ export function HealthChat({
         console.warn('Could not save chat history to localStorage', e)
       }
 
+      // Sync to Firestore if user is authenticated
+      if (auth.currentUser) {
+        const activeItem = updated.find((c) => c.id === chatId)
+        if (activeItem) {
+          createChatSession(auth.currentUser.uid, activeItem.title)
+            .then(() => {
+              const lastMsg = currentMsgs[currentMsgs.length - 1]
+              if (lastMsg && auth.currentUser) {
+                const text = lastMsg.text || lastMsg.recordAnswer?.shortAnswer || lastMsg.generalAnswer?.shortAnswer || 'Consultation response'
+                sendChatMessage(chatId, auth.currentUser.uid, lastMsg.sender, text)
+              }
+            })
+            .catch((err) => console.error('Failed to sync chat to Firestore:', err))
+        }
+      }
+
       return updated
     })
   }
@@ -928,6 +946,9 @@ export function HealthChat({
   }
 
   const handleConfirmDelete = (id: string) => {
+    if (auth.currentUser) {
+      deleteChatSession(id).catch((err) => console.error('Failed to delete chat session in Firestore:', err))
+    }
     setConversations((prev) => {
       const updated = prev.filter((c) => c.id !== id)
       try {

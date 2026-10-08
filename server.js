@@ -6,12 +6,7 @@ import { fileURLToPath } from 'node:url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const PORT = parseInt(
-  process.env.APP_PORT ||
-  process.env.DEFAULT_APP_PORT ||
-  (process.env.PORT && process.env.PORT !== '8080' ? process.env.PORT : '3000'),
-  10
-)
+const PORT = parseInt(process.env.PORT || '3000', 10)
 const HOST = '0.0.0.0'
 
 function getDistDir() {

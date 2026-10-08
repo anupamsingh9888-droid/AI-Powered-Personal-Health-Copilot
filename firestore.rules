@@ -1,0 +1,139 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all unknown paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 1. Users collection: user documents keyed by Auth UID
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidId(userId)
+                    && incoming().userId == userId
+                    && incoming().name is string && incoming().name.size() <= 100
+                    && incoming().email is string && incoming().email.size() <= 200;
+      allow update: if isOwner(userId) && incoming().userId == existing().userId;
+      allow delete: if false;
+    }
+
+    // 2. Health Profiles: User biometrics and clinical details
+    match /healthProfiles/{profileId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(profileId)
+                    && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && existing().userId == request.auth.uid
+                    && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // 3. Health Records: Clinical encounters and timeline items
+    match /healthRecords/{recordId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(recordId)
+                    && incoming().userId == request.auth.uid
+                    && incoming().title is string && incoming().title.size() <= 200;
+      allow update: if isSignedIn() && existing().userId == request.auth.uid
+                    && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // 4. Medications: Prescriptions and daily schedules
+    match /medications/{medicationId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(medicationId)
+                    && incoming().userId == request.auth.uid
+                    && incoming().name is string && incoming().name.size() <= 150;
+      allow update: if isSignedIn() && existing().userId == request.auth.uid
+                    && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // 5. Lab Reports: Diagnostic panels and lab results
+    match /labReports/{reportId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(reportId)
+                    && incoming().userId == request.auth.uid
+                    && incoming().testName is string && incoming().testName.size() <= 150;
+      allow update: if isSignedIn() && existing().userId == request.auth.uid
+                    && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // 6. Symptoms: Patient symptom logs
+    match /symptoms/{symptomId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(symptomId)
+                    && incoming().userId == request.auth.uid
+                    && incoming().name is string && incoming().name.size() <= 150;
+      allow update: if isSignedIn() && existing().userId == request.auth.uid
+                    && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // 7. Chat Sessions: Consultation conversational sessions
+    match /chatSessions/{sessionId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(sessionId)
+                    && incoming().userId == request.auth.uid
+                    && incoming().title is string && incoming().title.size() <= 200;
+      allow update: if isSignedIn() && existing().userId == request.auth.uid
+                    && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // 8. Chat Messages: Individual messages
+    match /chatMessages/{messageId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(messageId)
+                    && incoming().userId == request.auth.uid
+                    && incoming().sessionId is string && incoming().sessionId.size() <= 128
+                    && incoming().text is string && incoming().text.size() <= 5000;
+      allow update: if false; // Messages are immutable
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // 9. Health Insights: Personalized recommendations and alerts
+    match /healthInsights/{insightId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(insightId)
+                    && incoming().userId == request.auth.uid
+                    && incoming().title is string && incoming().title.size() <= 200;
+      allow update: if isSignedIn() && existing().userId == request.auth.uid
+                    && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+  }
+}

@@ -1,6 +1,56 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowRight, Camera, Check, ChevronRight, CloudUpload, FileText, FlaskConical, Hospital, Maximize2, Minus, Plus, ScanLine, ShieldCheck, Sparkles, Stethoscope, X, FileSearch } from 'lucide-react'
-import { Badge, Btn, Card, ConfBar, ConfRing, DocPaper, Eyebrow, PageHead, cx, levelOf, useEvidence, useL, useToast, CBC_REGIONS, RX_REGIONS, type EvidenceTarget, type Level } from './ui'
+import {
+  ArrowRight,
+  Camera,
+  Check,
+  ChevronRight,
+  CloudUpload,
+  FileText,
+  FlaskConical,
+  Hospital,
+  Maximize2,
+  Minus,
+  Plus,
+  ScanLine,
+  ShieldCheck,
+  Sparkles,
+  Stethoscope,
+  X,
+  FileSearch,
+  AlertCircle,
+  CheckCircle2,
+  Clock,
+  Database,
+  Loader2,
+  Trash2,
+} from 'lucide-react'
+import {
+  Badge,
+  Btn,
+  Card,
+  ConfBar,
+  ConfRing,
+  DocPaper,
+  Eyebrow,
+  PageHead,
+  cx,
+  levelOf,
+  useEvidence,
+  useL,
+  useToast,
+  CBC_REGIONS,
+  RX_REGIONS,
+  type EvidenceTarget,
+  type Level,
+} from './ui'
+import {
+  uploadMedicalDocument,
+  getMedicalDocuments,
+  updateDocumentProcessingStatus,
+  deleteMedicalDocument,
+  type MedicalDocument,
+  type ProcessingStatus,
+} from './services/medicalDocumentService'
 
 /* ================= Evidence drawer ================= */
 const EVIDENCE: Record<string, { label: string; value: string; doc: string; date: string; conf: number; why: string; kind: 'rx' | 'cbc' }> = {
@@ -92,7 +142,136 @@ export function Documents() {
   const [phase, setPhase] = useState<'upload' | 'uploading' | 'processing' | 'review'>('upload')
   const [drag, setDrag] = useState(false)
   const [pct, setPct] = useState(0)
+  const [uploadInfo, setUploadInfo] = useState<{
+    fileName: string
+    fileSize: string
+    docType: string
+  }>({
+    fileName: 'prescription_04oct.jpg',
+    fileSize: '1.8 MB',
+    docType: 'Prescription',
+  })
+  const [currentDoc, setCurrentDoc] = useState<MedicalDocument | null>(null)
+  const [documents, setDocuments] = useState<MedicalDocument[]>([])
+  const [loadingDocs, setLoadingDocs] = useState<boolean>(true)
+  const [docsError, setDocsError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | number | null>(null)
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const photoInputRef = useRef<HTMLInputElement>(null)
+  const pendingDocTypeRef = useRef<string>('Prescription')
   const L = useL()
+  const toast = useToast()
+
+  const loadDocuments = async () => {
+    try {
+      setLoadingDocs(true)
+      setDocsError(null)
+      const list = await getMedicalDocuments()
+      setDocuments(list)
+    } catch (err: any) {
+      console.warn('Could not load documents from PostgreSQL:', err)
+      setDocsError(err.message || 'Could not load documents from database')
+    } finally {
+      setLoadingDocs(false)
+    }
+  }
+
+  useEffect(() => {
+    loadDocuments()
+  }, [])
+
+  const startUpload = async (
+    fileName: string,
+    fileSizeNum: number,
+    mimeType: string,
+    docType: string
+  ) => {
+    const formattedSize =
+      fileSizeNum > 0
+        ? `${(fileSizeNum / (1024 * 1024)).toFixed(1)} MB`
+        : '1.8 MB'
+
+    setUploadInfo({
+      fileName,
+      fileSize: formattedSize,
+      docType,
+    })
+    setPct(0)
+    setPhase('uploading')
+
+    try {
+      // 1. Store metadata in PostgreSQL with status 'UPLOADED'
+      const doc = await uploadMedicalDocument({
+        docType,
+        originalFilename: fileName,
+        fileSize: fileSizeNum || 1800000,
+        mimeType: mimeType || 'application/pdf',
+        processingStatus: 'UPLOADED',
+      })
+      setCurrentDoc(doc)
+      toast(
+        L(
+          `Document #${doc.documentId} metadata saved in PostgreSQL.`,
+          `दस्तावेज़ #${doc.documentId} मेटाडेटा PostgreSQL में सुरक्षित।`
+        ),
+        'ok'
+      )
+      await loadDocuments()
+    } catch (err: any) {
+      console.error('Error storing document in PostgreSQL:', err)
+      toast(err.message || 'Failed to save document metadata in PostgreSQL', 'warn')
+    }
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const docType = pendingDocTypeRef.current || 'Prescription'
+    startUpload(file.name, file.size, file.type, docType)
+    e.target.value = ''
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDrag(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      startUpload(file.name, file.size, file.type, 'General Medical')
+    } else {
+      startUpload('prescription_04oct.jpg', 1800000, 'image/jpeg', 'Prescription')
+    }
+  }
+
+  const handleTriggerPick = (docType: string = 'Prescription') => {
+    pendingDocTypeRef.current = docType
+    fileInputRef.current?.click()
+  }
+
+  const handleTriggerPhoto = () => {
+    pendingDocTypeRef.current = 'Prescription'
+    if (photoInputRef.current) {
+      photoInputRef.current.click()
+    } else {
+      fileInputRef.current?.click()
+    }
+  }
+
+  const handleDeleteDoc = async (id: string | number, name: string) => {
+    if (!confirm(L(`Delete document "${name}" from PostgreSQL?`, `क्या आप दस्तावेज़ "${name}" को PostgreSQL से हटाना चाहते हैं?`))) {
+      return
+    }
+    try {
+      setDeletingId(id)
+      await deleteMedicalDocument(id)
+      toast(L(`Document deleted from PostgreSQL.`, `दस्तावेज़ PostgreSQL से हटा दिया गया।`), 'ok')
+      await loadDocuments()
+    } catch (err: any) {
+      toast(err.message || 'Could not delete document', 'warn')
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   useEffect(() => {
     if (phase !== 'uploading') return
@@ -100,60 +279,335 @@ export function Documents() {
     const id = setInterval(() => setPct((p) => (p >= 100 ? 100 : p + 8)), 90)
     return () => clearInterval(id)
   }, [phase])
-  useEffect(() => {
-    if (phase === 'uploading' && pct >= 100) setPhase('processing')
-  }, [pct, phase])
 
-  if (phase === 'processing') return <Processing onDone={() => setPhase('review')} />
-  if (phase === 'review') return <Extraction onReset={() => setPhase('upload')} />
+  useEffect(() => {
+    if (phase === 'uploading' && pct >= 100) {
+      // Transition PostgreSQL status from UPLOADED to PROCESSING
+      if (currentDoc) {
+        updateDocumentProcessingStatus(currentDoc.documentId, 'PROCESSING')
+          .then((updated) => {
+            setCurrentDoc(updated)
+            loadDocuments()
+          })
+          .catch(console.error)
+      }
+      setPhase('processing')
+    }
+  }, [pct, phase, currentDoc])
+
+  const handleProcessingDone = async () => {
+    // Transition PostgreSQL status from PROCESSING to COMPLETED
+    if (currentDoc) {
+      try {
+        const updated = await updateDocumentProcessingStatus(
+          currentDoc.documentId,
+          'COMPLETED'
+        )
+        setCurrentDoc(updated)
+        await loadDocuments()
+      } catch (e) {
+        console.error('Failed to update status to COMPLETED:', e)
+      }
+    }
+    setPhase('review')
+  }
+
+  if (phase === 'processing') {
+    return (
+      <Processing
+        docName={uploadInfo.fileName}
+        docSize={uploadInfo.fileSize}
+        onDone={handleProcessingDone}
+      />
+    )
+  }
+
+  if (phase === 'review') {
+    return <Extraction onReset={() => setPhase('upload')} />
+  }
 
   return (
-    <div className="anim-fade-up mx-auto max-w-4xl">
-      <PageHead title={L('Add to your health record', 'अपने स्वास्थ्य रिकॉर्ड में जोड़ें')} sub={L('Upload a prescription, laboratory report, diagnostic report, or discharge summary.', 'प्रिस्क्रिप्शन, लैब रिपोर्ट, डायग्नोस्टिक रिपोर्ट या डिस्चार्ज सारांश अपलोड करें।')} />
+    <div className="anim-fade-up mx-auto max-w-4xl space-y-10">
+      <PageHead
+        title={L('Add to your health record', 'अपने स्वास्थ्य रिकॉर्ड में जोड़ें')}
+        sub={L(
+          'Upload a prescription, laboratory report, diagnostic report, or discharge summary directly to PostgreSQL.',
+          'प्रिस्क्रिप्शन, लैब रिपोर्ट, डायग्नोस्टिक रिपोर्ट या डिस्चार्ज सारांश सीधे PostgreSQL में अपलोड करें।'
+        )}
+      />
+
+      {/* Hidden file inputs */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,.png,.jpg,.jpeg,.webp"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+      <input
+        ref={photoInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
       <div
-        onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setDrag(true)
+        }}
         onDragLeave={() => setDrag(false)}
-        onDrop={(e) => { e.preventDefault(); setDrag(false); setPhase('uploading') }}
-        className={cx('relative overflow-hidden rounded-[28px] border-2 border-dashed px-6 py-16 text-center transition-all duration-300 md:py-20', drag ? 'scale-[1.01] border-sky-400 bg-sky-50/60' : 'border-slate-300/80 bg-white hover:border-slate-400')}
+        onDrop={handleDrop}
+        className={cx(
+          'relative overflow-hidden rounded-[28px] border-2 border-dashed px-6 py-16 text-center transition-all duration-300 md:py-20',
+          drag
+            ? 'scale-[1.01] border-sky-400 bg-sky-50/60'
+            : 'border-slate-300/80 bg-white hover:border-slate-400'
+        )}
       >
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(14,165,233,.07),transparent)]" />
         {phase === 'uploading' ? (
           <div className="relative mx-auto max-w-xs">
-            <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-2xl bg-sky-50 text-sky-600"><FileText size={28} strokeWidth={1.5} /></div>
-            <p className="font-display text-xl font-semibold">Uploading prescription.jpg</p>
-            <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-sky-500 to-teal-500 transition-all" style={{ width: `${pct}%` }} /></div>
-            <p className="mt-2 text-xs tabular-nums text-slate-400">{Math.min(pct, 100)}% · 1.8 MB</p>
+            <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-2xl bg-sky-50 text-sky-600">
+              <FileText size={28} strokeWidth={1.5} />
+            </div>
+            <p className="font-display text-xl font-semibold">
+              Uploading {uploadInfo.fileName}
+            </p>
+            <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-sky-500 to-teal-500 transition-all"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <p className="mt-2 text-xs tabular-nums text-slate-400">
+              {Math.min(pct, 100)}% · {uploadInfo.fileSize}
+            </p>
+            <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-teal-700 font-medium">
+              <Database size={13} />
+              <span>Saving metadata to PostgreSQL...</span>
+            </div>
           </div>
         ) : (
           <div className="relative">
-            <div className={cx('mx-auto mb-6 grid h-20 w-20 place-items-center rounded-3xl bg-gradient-to-br from-sky-50 to-teal-50 text-sky-700 ring-1 ring-sky-100', drag ? '' : 'anim-drift')}>
+            <div
+              className={cx(
+                'mx-auto mb-6 grid h-20 w-20 place-items-center rounded-3xl bg-gradient-to-br from-sky-50 to-teal-50 text-sky-700 ring-1 ring-sky-100',
+                drag ? '' : 'anim-drift'
+              )}
+            >
               <CloudUpload size={34} strokeWidth={1.4} />
             </div>
-            <h2 className="font-display text-2xl font-semibold tracking-tight">{drag ? 'Release to upload' : L('Drop your document here', 'अपना दस्तावेज़ यहाँ छोड़ें')}</h2>
+            <h2 className="font-display text-2xl font-semibold tracking-tight">
+              {drag
+                ? 'Release to upload'
+                : L('Drop your document here', 'अपना दस्तावेज़ यहाँ छोड़ें')}
+            </h2>
             <p className="mt-2 text-slate-500">
               {L('or', 'या')}{' '}
-              <button onClick={() => setPhase('uploading')} className="font-medium text-sky-700 underline decoration-sky-300 underline-offset-4 hover:decoration-sky-600">{L('choose a file', 'फ़ाइल चुनें')}</button>
+              <button
+                type="button"
+                onClick={() => handleTriggerPick('General Medical')}
+                className="font-medium text-sky-700 underline decoration-sky-300 underline-offset-4 hover:decoration-sky-600 cursor-pointer"
+              >
+                {L('choose a file', 'फ़ाइल चुनें')}
+              </button>
             </p>
-            <p className="mt-5 text-xs font-medium tracking-wide text-slate-400">PDF · JPG · PNG</p>
-            <div className="mt-6 flex justify-center">
-              <Btn v="secondary" onClick={() => setPhase('uploading')}><Camera size={16} />{L('Take a photo', 'फ़ोटो लें')}</Btn>
+            <p className="mt-5 text-xs font-medium tracking-wide text-slate-400">
+              PDF · JPG · PNG
+            </p>
+            <div className="mt-6 flex justify-center gap-2.5">
+              <Btn v="secondary" onClick={handleTriggerPhoto}>
+                <Camera size={16} />
+                {L('Take a photo', 'फ़ोटो लें')}
+              </Btn>
+              <Btn onClick={() => handleTriggerPick('Prescription')}>
+                <FileText size={16} />
+                {L('Browse files', 'फ़ाइल चुनें')}
+              </Btn>
             </div>
           </div>
         )}
       </div>
 
-      <div className="mt-10">
+      <div>
         <Eyebrow className="mb-3">Supported documents</Eyebrow>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {docTypes.map((d) => (
-            <button key={d.t} onClick={() => setPhase('uploading')} className="group rounded-2xl border border-slate-200 bg-white p-4 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
-              <span className={cx('mb-4 grid h-10 w-10 place-items-center rounded-xl', d.c)}><d.i size={19} strokeWidth={1.7} /></span>
+            <button
+              key={d.t}
+              onClick={() => handleTriggerPick(d.t)}
+              className="group rounded-2xl border border-slate-200 bg-white p-4 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md cursor-pointer"
+            >
+              <span
+                className={cx(
+                  'mb-4 grid h-10 w-10 place-items-center rounded-xl',
+                  d.c
+                )}
+              >
+                <d.i size={19} strokeWidth={1.7} />
+              </span>
               <p className="text-sm font-semibold">{d.t}</p>
               <p className="mt-0.5 text-xs text-slate-500">{d.d}</p>
             </button>
           ))}
         </div>
-        <p className="mt-6 flex items-center gap-2 text-xs text-slate-400"><ShieldCheck size={14} className="text-teal-600" />Documents are processed to build your record. Try any option above to see the full demo.</p>
+        <p className="mt-6 flex items-center gap-2 text-xs text-slate-400">
+          <ShieldCheck size={14} className="text-teal-600" />
+          Document metadata is securely saved in Cloud SQL PostgreSQL for your authenticated account.
+        </p>
+      </div>
+
+      {/* Uploaded Documents in PostgreSQL */}
+      <div className="space-y-4 pt-4 border-t border-slate-200">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-teal-50 text-teal-700">
+              <Database size={15} />
+            </span>
+            <h3 className="font-display text-lg font-bold text-slate-900">
+              {L('Uploaded Documents in PostgreSQL', 'PostgreSQL में अपलोड किए गए दस्तावेज़')}
+            </h3>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+              {documents.length}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={loadDocuments}
+            disabled={loadingDocs}
+            className="text-xs font-semibold text-teal-700 hover:underline flex items-center gap-1 cursor-pointer"
+          >
+            {loadingDocs ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <Clock size={13} />
+            )}
+            <span>{L('Refresh', 'रिफ्रेश')}</span>
+          </button>
+        </div>
+
+        {docsError && (
+          <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center gap-2">
+            <AlertCircle size={15} className="text-amber-600 shrink-0" />
+            <span>{docsError}</span>
+          </div>
+        )}
+
+        {loadingDocs && documents.length === 0 ? (
+          <div className="p-8 text-center bg-white rounded-2xl border border-slate-200 flex flex-col items-center justify-center gap-2 text-slate-500">
+            <Loader2 size={24} className="animate-spin text-teal-600" />
+            <p className="text-xs font-medium">Loading documents from PostgreSQL...</p>
+          </div>
+        ) : documents.length === 0 ? (
+          <div className="p-8 text-center bg-white rounded-2xl border border-slate-200 text-slate-500 space-y-2">
+            <div className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-400">
+              <FileText size={20} />
+            </div>
+            <p className="text-sm font-semibold text-slate-800">
+              {L('No documents in PostgreSQL yet', 'अभी तक PostgreSQL में कोई दस्तावेज़ नहीं')}
+            </p>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+              {L(
+                'Upload your first medical report or prescription above to store metadata in PostgreSQL.',
+                'PostgreSQL में मेटाडेटा सुरक्षित करने के लिए ऊपर अपना पहला मेडिकल दस्तावेज़ अपलोड करें।'
+              )}
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {documents.map((doc) => {
+              const status = doc.processingStatus || 'UPLOADED'
+              const formattedDate = doc.uploadedAt
+                ? new Date(doc.uploadedAt).toLocaleString([], {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : 'Just now'
+
+              return (
+                <Card
+                  key={doc.documentId}
+                  className="p-4 border border-slate-200 hover:border-slate-300 transition-all flex flex-col justify-between gap-3 bg-white"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <span className="font-mono text-[11px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                        DOC #{doc.documentId}
+                      </span>
+
+                      {/* Processing Status Badge */}
+                      <span
+                        className={cx(
+                          'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border',
+                          status === 'COMPLETED'
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : status === 'PROCESSING'
+                            ? 'bg-amber-50 text-amber-800 border-amber-200'
+                            : status === 'FAILED'
+                            ? 'bg-rose-50 text-rose-800 border-rose-200'
+                            : 'bg-sky-50 text-sky-800 border-sky-200'
+                        )}
+                      >
+                        {status === 'COMPLETED' ? (
+                          <CheckCircle2 size={11} className="text-emerald-600" />
+                        ) : status === 'PROCESSING' ? (
+                          <Loader2 size={11} className="animate-spin text-amber-600" />
+                        ) : status === 'FAILED' ? (
+                          <AlertCircle size={11} className="text-rose-600" />
+                        ) : (
+                          <Clock size={11} className="text-sky-600" />
+                        )}
+                        <span>{status}</span>
+                      </span>
+                    </div>
+
+                    <p className="font-bold text-sm text-slate-900 truncate">
+                      {doc.originalFilename || doc.fileName}
+                    </p>
+
+                    <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
+                      <span className="font-medium text-slate-700">{doc.docType}</span>
+                      <span>·</span>
+                      <span className="text-[11px]">{formattedDate}</span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
+                    <span className="text-[11px] text-slate-400">
+                      UID: {doc.userId.slice(0, 8)}...
+                    </span>
+
+                    <button
+                      type="button"
+                      disabled={deletingId === doc.documentId}
+                      onClick={() =>
+                        handleDeleteDoc(
+                          doc.documentId,
+                          doc.originalFilename || doc.fileName
+                        )
+                      }
+                      className="text-slate-400 hover:text-rose-600 transition p-1 rounded-lg hover:bg-rose-50 cursor-pointer"
+                      title={L('Delete document metadata', 'दस्तावेज़ मेटाडेटा हटाएँ')}
+                    >
+                      {deletingId === doc.documentId ? (
+                        <Loader2 size={13} className="animate-spin text-rose-600" />
+                      ) : (
+                        <Trash2 size={13} />
+                      )}
+                    </button>
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -162,7 +616,15 @@ export function Documents() {
 /* ================= Processing ================= */
 const steps = ['Document recognized', 'Text extracted', 'Medical information identified', 'Validating extracted data', 'Creating health record']
 
-function Processing({ onDone }: { onDone: () => void }) {
+function Processing({
+  onDone,
+  docName,
+  docSize,
+}: {
+  onDone: () => void
+  docName?: string
+  docSize?: string
+}) {
   const [n, setN] = useState(0)
   useEffect(() => {
     if (n >= steps.length) return
@@ -181,7 +643,9 @@ function Processing({ onDone }: { onDone: () => void }) {
             </div>
           )}
         </div>
-        <p className="mt-3 text-center text-xs text-slate-400">prescription_04oct.jpg · 1.8 MB</p>
+        <p className="mt-3 text-center text-xs text-slate-400">
+          {docName || 'prescription_04oct.jpg'} · {docSize || '1.8 MB'}
+        </p>
       </div>
 
       <div className="flex flex-col justify-center">

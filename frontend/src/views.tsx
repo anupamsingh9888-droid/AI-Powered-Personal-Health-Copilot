@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import {
   ArrowDown,
   ArrowLeft,
@@ -32,10 +32,12 @@ import {
   Edit2,
   Save,
   X,
+  Loader2,
 } from 'lucide-react'
 import { Badge, Btn, Card, ConfBar, ConfRing, DocPaper, Eyebrow, PageHead, cx, useEvidence, useL, useToast, formatAppointmentDate, type StatusKey } from './ui'
 import type { ConditionInfo, Appointment, MedicationItem, HealthAlert, UserHealthProfile } from './types'
 import { PersonalizedRecommendations } from './components/PersonalizedRecommendations'
+import { getHealthProfile, updateHealthProfile } from './services/healthProfileService'
 
 export type Go = (v: string, extra?: any) => void
 
@@ -1689,9 +1691,17 @@ export function Profile({
   const L = useL()
   const toast = useToast()
 
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [profileData, setProfileData] = useState<UserHealthProfile | null>(user || null)
+
   const [isEditing, setIsEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
   const [formData, setFormData] = useState({
     name: user?.name || 'Alex Rao',
+    dateOfBirth: user?.dateOfBirth || '',
     age: user?.age || '34',
     gender: user?.gender || 'Male',
     height: user?.height || '178',
@@ -1699,27 +1709,198 @@ export function Profile({
     weight: user?.weight || '68',
     weightUnit: user?.weightUnit || 'kg',
     bloodGroup: user?.bloodGroup || 'O+',
+    allergies: user?.allergies?.join(', ') || '',
+    existingConditions: user?.existingConditions?.join(', ') || '',
+    currentMedications: user?.currentMedications?.join(', ') || '',
+    emergencyContact: user?.emergencyContact || '',
   })
 
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!user || !onUpdateUser) return
-    const updated: UserHealthProfile = {
-      ...user,
-      name: formData.name,
-      avatarChar: formData.name.charAt(0).toUpperCase(),
-      age: formData.age,
-      gender: formData.gender,
-      height: formData.height,
-      heightUnit: formData.heightUnit,
-      weight: formData.weight,
-      weightUnit: formData.weightUnit,
-      bloodGroup: formData.bloodGroup,
+  // Load authenticated user's profile from PostgreSQL via API
+  const fetchProfile = async () => {
+    try {
+      setLoading(true)
+      setLoadError(null)
+      const data = await getHealthProfile()
+      if (data) {
+        const updated: UserHealthProfile = {
+          name: data.fullName || user?.name || 'Alex Rao',
+          email: user?.email || 'user@health.org',
+          avatarChar: (data.fullName || user?.name || 'A').charAt(0).toUpperCase(),
+          role: user?.role || 'Personal account',
+          abhaId: user?.abhaId || '91-4820-1928-3341',
+          age: data.age || user?.age || '34',
+          gender: data.gender || user?.gender || 'Male',
+          height: data.height || user?.height || '178',
+          heightUnit: data.heightUnit || user?.heightUnit || 'cm',
+          weight: data.weight || user?.weight || '68',
+          weightUnit: data.weightUnit || user?.weightUnit || 'kg',
+          bloodGroup: data.bloodGroup || user?.bloodGroup || 'O+',
+          dateOfBirth: data.dateOfBirth || user?.dateOfBirth || '',
+          emergencyContact: data.emergencyContact || user?.emergencyContact || '',
+          allergies: data.allergies?.length ? data.allergies : (user?.allergies || []),
+          existingConditions: data.existingConditions?.length ? data.existingConditions : (user?.existingConditions || []),
+          currentMedications: data.currentMedications?.length ? data.currentMedications : (user?.currentMedications || []),
+          onboarded: true,
+          hasRecords: true,
+        }
+        setProfileData(updated)
+        setFormData({
+          name: updated.name,
+          dateOfBirth: updated.dateOfBirth || '',
+          age: updated.age || '34',
+          gender: updated.gender || 'Male',
+          height: updated.height || '178',
+          heightUnit: updated.heightUnit || 'cm',
+          weight: updated.weight || '68',
+          weightUnit: updated.weightUnit || 'kg',
+          bloodGroup: updated.bloodGroup || 'O+',
+          allergies: updated.allergies?.join(', ') || '',
+          existingConditions: updated.existingConditions?.join(', ') || '',
+          currentMedications: updated.currentMedications?.join(', ') || '',
+          emergencyContact: updated.emergencyContact || '',
+        })
+        if (onUpdateUser) {
+          onUpdateUser(updated)
+        }
+      } else if (user) {
+        setProfileData(user)
+      }
+    } catch (err: any) {
+      console.error('Failed to load profile from PostgreSQL:', err)
+      setLoadError(err?.message || 'Failed to load profile from PostgreSQL')
+    } finally {
+      setLoading(false)
     }
-    onUpdateUser(updated)
-    setIsEditing(false)
-    toast('Profile updated successfully!', 'ok')
   }
+
+  useEffect(() => {
+    fetchProfile()
+  }, [])
+
+  const handleOpenEdit = () => {
+    const active = profileData || user
+    setFormData({
+      name: active?.name || 'Alex Rao',
+      dateOfBirth: active?.dateOfBirth || '',
+      age: active?.age || '34',
+      gender: active?.gender || 'Male',
+      height: active?.height || '178',
+      heightUnit: active?.heightUnit || 'cm',
+      weight: active?.weight || '68',
+      weightUnit: active?.weightUnit || 'kg',
+      bloodGroup: active?.bloodGroup || 'O+',
+      allergies: active?.allergies?.join(', ') || '',
+      existingConditions: active?.existingConditions?.join(', ') || '',
+      currentMedications: active?.currentMedications?.join(', ') || '',
+      emergencyContact: active?.emergencyContact || '',
+    })
+    setSaveError(null)
+    setIsEditing(true)
+  }
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaveError(null)
+
+    // Validation
+    if (!formData.name.trim()) {
+      setSaveError(L('Full name is required.', 'पूरा नाम आवश्यक है।'))
+      return
+    }
+
+    if (formData.age) {
+      const ageNum = parseInt(formData.age, 10)
+      if (isNaN(ageNum) || ageNum < 0 || ageNum > 130) {
+        setSaveError(L('Age must be a valid number between 0 and 130.', 'उम्र 0 से 130 के बीच होनी चाहिए।'))
+        return
+      }
+    }
+
+    if (formData.height) {
+      const hNum = parseFloat(formData.height)
+      if (isNaN(hNum) || hNum <= 0 || hNum > 300) {
+        setSaveError(L('Height must be a valid number between 1 and 300 cm.', 'ऊँचाई 1 से 300 सेमी के बीच होनी चाहिए।'))
+        return
+      }
+    }
+
+    if (formData.weight) {
+      const wNum = parseFloat(formData.weight)
+      if (isNaN(wNum) || wNum <= 0 || wNum > 500) {
+        setSaveError(L('Weight must be a valid number between 1 and 500 kg.', 'वज़न 1 से 500 किग्रा के बीच होना चाहिए।'))
+        return
+      }
+    }
+
+    try {
+      setSaving(true)
+      const parsedAllergies = formData.allergies
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const parsedConditions = formData.existingConditions
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const parsedMeds = formData.currentMedications
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+
+      const savedDoc = await updateHealthProfile({
+        fullName: formData.name.trim(),
+        dateOfBirth: formData.dateOfBirth.trim(),
+        age: formData.age.trim(),
+        gender: formData.gender,
+        height: formData.height.trim(),
+        heightUnit: formData.heightUnit || 'cm',
+        weight: formData.weight.trim(),
+        weightUnit: formData.weightUnit || 'kg',
+        bloodGroup: formData.bloodGroup,
+        emergencyContact: formData.emergencyContact.trim(),
+        allergies: parsedAllergies,
+        existingConditions: parsedConditions,
+        currentMedications: parsedMeds,
+      })
+
+      const updatedUser: UserHealthProfile = {
+        name: savedDoc.fullName || formData.name.trim(),
+        email: user?.email || 'user@health.org',
+        avatarChar: (savedDoc.fullName || formData.name).charAt(0).toUpperCase(),
+        role: user?.role || 'Personal account',
+        abhaId: user?.abhaId || '91-4820-1928-3341',
+        age: savedDoc.age || formData.age,
+        gender: savedDoc.gender || formData.gender,
+        height: savedDoc.height || formData.height,
+        heightUnit: savedDoc.heightUnit || formData.heightUnit,
+        weight: savedDoc.weight || formData.weight,
+        weightUnit: savedDoc.weightUnit || formData.weightUnit,
+        bloodGroup: savedDoc.bloodGroup || formData.bloodGroup,
+        dateOfBirth: savedDoc.dateOfBirth || formData.dateOfBirth,
+        emergencyContact: savedDoc.emergencyContact || formData.emergencyContact,
+        allergies: savedDoc.allergies || parsedAllergies,
+        existingConditions: savedDoc.existingConditions || parsedConditions,
+        currentMedications: savedDoc.currentMedications || parsedMeds,
+        onboarded: true,
+        hasRecords: true,
+      }
+
+      setProfileData(updatedUser)
+      if (onUpdateUser) {
+        onUpdateUser(updatedUser)
+      }
+      setIsEditing(false)
+      toast(L('Health profile saved to PostgreSQL successfully!', 'स्वास्थ्य प्रोफ़ाइल PostgreSQL में सहेजी गई!'), 'ok')
+    } catch (err: any) {
+      console.error('Error saving profile to PostgreSQL:', err)
+      setSaveError(err.message || L('Failed to save profile. Please try again.', 'प्रोफ़ाइल सहेजने में विफल। कृपया पुनः प्रयास करें।'))
+      toast(L('Failed to save profile', 'प्रोफ़ाइल सहेजने में विफल'), 'warn')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const activeUser = profileData || user
 
   const res = [
     ['Patient', 'Demographics, identifiers', 1],
@@ -1735,8 +1916,8 @@ export function Profile({
         <PageHead
           title={L('Health Profile', 'स्वास्थ्य प्रोफ़ाइल')}
           sub={L(
-            'Your personal health metrics and interoperable health data architecture.',
-            'आपकी व्यक्तिगत स्वास्थ्य जानकारी और अंतर-संचालनीय स्वास्थ्य संरचना।'
+            'Your personal health metrics and interoperable health data architecture backed by PostgreSQL.',
+            'आपकी व्यक्तिगत स्वास्थ्य जानकारी और PostgreSQL समर्थित स्वास्थ्य संरचना।'
           )}
         />
         {onLogout && (
@@ -1746,46 +1927,112 @@ export function Profile({
         )}
       </div>
 
+      {/* Loading State Banner */}
+      {loading && !profileData && (
+        <Card className="p-8 flex flex-col items-center justify-center text-center space-y-3">
+          <Loader2 className="animate-spin text-teal-600" size={28} />
+          <p className="text-sm font-medium text-slate-700">
+            {L('Loading health profile from PostgreSQL...', 'PostgreSQL से स्वास्थ्य प्रोफ़ाइल लोड हो रही है...')}
+          </p>
+        </Card>
+      )}
+
+      {/* Load Error State */}
+      {loadError && !profileData && (
+        <Card className="p-6 border-amber-200 bg-amber-50/50">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="text-amber-600 shrink-0 mt-0.5" size={18} />
+            <div className="flex-1 text-xs">
+              <p className="font-semibold text-amber-900">
+                {L('Could not load profile from database', 'डेटाबेस से प्रोफ़ाइल लोड नहीं हो सकी')}
+              </p>
+              <p className="text-amber-700 mt-1">{loadError}</p>
+              <button
+                onClick={fetchProfile}
+                className="mt-3 px-3 py-1.5 rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-700 cursor-pointer"
+              >
+                {L('Retry Connection', 'पुनः प्रयास करें')}
+              </button>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Edit Profile Modal */}
       {isEditing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-          <Card className="max-w-md w-full p-6 space-y-4 anim-fade-up">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs overflow-y-auto">
+          <Card className="max-w-lg w-full p-6 space-y-4 anim-fade-up max-h-[90vh] overflow-y-auto my-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-display text-lg font-bold text-slate-900">
-                {L('Edit Personal Details', 'व्यक्तिगत जानकारी संपादित करें')}
-              </h3>
-              <button onClick={() => setIsEditing(false)} className="text-slate-400 hover:text-slate-600">
+              <div>
+                <h3 className="font-display text-lg font-bold text-slate-900">
+                  {L('Edit Health Profile', 'स्वास्थ्य प्रोफ़ाइल संपादित करें')}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {L('Stored securely in Cloud SQL PostgreSQL', 'क्लाउड SQL PostgreSQL में सुरक्षित रूप से संगृहीत')}
+                </p>
+              </div>
+              <button
+                onClick={() => !saving && setIsEditing(false)}
+                disabled={saving}
+                className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
+              >
                 <X size={18} />
               </button>
             </div>
 
+            {saveError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 flex items-start gap-2.5 text-xs text-rose-800">
+                <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                <p>{saveError}</p>
+              </div>
+            )}
+
             <form onSubmit={handleSave} className="space-y-3.5 text-xs">
               <div>
                 <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  {L('Full Name', 'पूरा नाम')}
+                  {L('Full Name', 'पूरा नाम')} *
                 </label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-teal-500 focus:outline-none"
+                  placeholder="e.g. Alex Rao"
                   required
+                  disabled={saving}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    {L('Date of Birth', 'जन्म तिथि')}
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.dateOfBirth}
+                    onChange={(e) => setFormData({ ...formData, dateOfBirth: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-teal-500 focus:outline-none"
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
                     {L('Age (Years)', 'उम्र (वर्ष)')}
                   </label>
                   <input
                     type="number"
+                    min="0"
+                    max="130"
                     value={formData.age}
                     onChange={(e) => setFormData({ ...formData, age: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-teal-500 focus:outline-none"
-                    required
+                    disabled={saving}
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
                     {L('Gender', 'लिंग')}
@@ -1794,10 +2041,31 @@ export function Profile({
                     value={formData.gender}
                     onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-teal-500 focus:outline-none"
+                    disabled={saving}
                   >
                     <option value="Male">Male</option>
                     <option value="Female">Female</option>
                     <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    {L('Blood Group', 'रक्त समूह')}
+                  </label>
+                  <select
+                    value={formData.bloodGroup}
+                    onChange={(e) => setFormData({ ...formData, bloodGroup: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-teal-500 focus:outline-none"
+                    disabled={saving}
+                  >
+                    <option value="A+">A+</option>
+                    <option value="A-">A-</option>
+                    <option value="B+">B+</option>
+                    <option value="B-">B-</option>
+                    <option value="AB+">AB+</option>
+                    <option value="AB-">AB-</option>
+                    <option value="O+">O+</option>
+                    <option value="O-">O-</option>
                   </select>
                 </div>
               </div>
@@ -1809,9 +2077,12 @@ export function Profile({
                   </label>
                   <input
                     type="number"
+                    min="1"
+                    max="300"
                     value={formData.height}
                     onChange={(e) => setFormData({ ...formData, height: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-teal-500 focus:outline-none"
+                    disabled={saving}
                   />
                 </div>
                 <div>
@@ -1820,40 +2091,94 @@ export function Profile({
                   </label>
                   <input
                     type="number"
+                    min="1"
+                    max="500"
                     value={formData.weight}
                     onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-teal-500 focus:outline-none"
+                    disabled={saving}
                   />
                 </div>
               </div>
 
               <div>
                 <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  {L('Blood Group', 'रक्त समूह')}
+                  {L('Allergies', 'एलर्जी')}
                 </label>
-                <select
-                  value={formData.bloodGroup}
-                  onChange={(e) => setFormData({ ...formData, bloodGroup: e.target.value })}
+                <input
+                  type="text"
+                  value={formData.allergies}
+                  onChange={(e) => setFormData({ ...formData, allergies: e.target.value })}
+                  placeholder="e.g. Penicillin, Peanuts (comma separated)"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-teal-500 focus:outline-none"
-                >
-                  <option value="A+">A+</option>
-                  <option value="A-">A-</option>
-                  <option value="B+">B+</option>
-                  <option value="B-">B-</option>
-                  <option value="AB+">AB+</option>
-                  <option value="AB-">AB-</option>
-                  <option value="O+">O+</option>
-                  <option value="O-">O-</option>
-                </select>
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  {L('Existing Conditions', 'मौजूदा स्थितियाँ')}
+                </label>
+                <input
+                  type="text"
+                  value={formData.existingConditions}
+                  onChange={(e) => setFormData({ ...formData, existingConditions: e.target.value })}
+                  placeholder="e.g. Type 2 Diabetes, Hypertension (comma separated)"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-teal-500 focus:outline-none"
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  {L('Current Medications', 'वर्तमान दवाएँ')}
+                </label>
+                <input
+                  type="text"
+                  value={formData.currentMedications}
+                  onChange={(e) => setFormData({ ...formData, currentMedications: e.target.value })}
+                  placeholder="e.g. Metformin 500mg, Atorvastatin 20mg (comma separated)"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-teal-500 focus:outline-none"
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  {L('Emergency Contact', 'आपातकालीन संपर्क')}
+                </label>
+                <input
+                  type="text"
+                  value={formData.emergencyContact}
+                  onChange={(e) => setFormData({ ...formData, emergencyContact: e.target.value })}
+                  placeholder="e.g. +91 98765 43210 (Spouse)"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-teal-500 focus:outline-none"
+                  disabled={saving}
+                />
               </div>
 
               <div className="flex gap-2 pt-3">
-                <Btn v="secondary" className="flex-1" onClick={() => setIsEditing(false)}>
+                <Btn
+                  v="secondary"
+                  className="flex-1"
+                  type="button"
+                  disabled={saving}
+                  onClick={() => setIsEditing(false)}
+                >
                   {L('Cancel', 'रद्द करें')}
                 </Btn>
-                <Btn className="flex-1" type="submit">
-                  <Save size={14} />
-                  <span>{L('Save Changes', 'बदलाव सहेजें')}</span>
+                <Btn className="flex-1" type="submit" disabled={saving}>
+                  {saving ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>{L('Saving to PostgreSQL...', 'सहेज रहे हैं...')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save size={14} />
+                      <span>{L('Save to Database', 'डेटाबेस में सहेजें')}</span>
+                    </>
+                  )}
                 </Btn>
               </div>
             </form>
@@ -1867,16 +2192,20 @@ export function Profile({
           <div className="mb-6 flex items-center justify-between">
             <div className="flex items-center gap-4">
               <span className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-sky-400 to-teal-500 font-display text-2xl font-bold text-white shadow-xs">
-                {user?.avatarChar || 'A'}
+                {activeUser?.avatarChar || 'A'}
               </span>
               <div>
-                <p className="font-display text-xl font-bold text-slate-900">{user?.name || 'Alex Rao'}</p>
-                <p className="text-xs text-slate-500">{user?.email || 'alex.rao@email.com'}</p>
+                <p className="font-display text-xl font-bold text-slate-900">{activeUser?.name || 'Alex Rao'}</p>
+                <p className="text-xs text-slate-500">{activeUser?.email || 'alex.rao@email.com'}</p>
+                <span className="inline-flex items-center gap-1 mt-1 text-[11px] font-medium text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200">
+                  <ShieldCheck size={12} />
+                  <span>PostgreSQL Connected</span>
+                </span>
               </div>
             </div>
 
             <button
-              onClick={() => setIsEditing(true)}
+              onClick={handleOpenEdit}
               className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
             >
               <Edit2 size={13} />
@@ -1887,16 +2216,36 @@ export function Profile({
           <Eyebrow className="mb-3">{L('Personal Health Baseline', 'व्यक्तिगत स्वास्थ्य माप')}</Eyebrow>
           <dl className="divide-y divide-slate-100 text-xs">
             {[
-              ['Age', `${user?.age || '34'} years`],
-              ['Gender', user?.gender || 'Male'],
-              ['Height', `${user?.height || '178'} ${user?.heightUnit || 'cm'}`],
-              ['Weight', `${user?.weight || '68'} ${user?.weightUnit || 'kg'}`],
-              ['Blood Group', user?.bloodGroup || 'O+'],
-              ['Health ID (ABHA mock)', user?.abhaId || '91-4820-1928-3341'],
+              ['Age', `${activeUser?.age || '34'} years`],
+              ...(activeUser?.dateOfBirth ? [['Date of Birth', activeUser.dateOfBirth]] : []),
+              ['Gender', activeUser?.gender || 'Male'],
+              ['Height', `${activeUser?.height || '178'} ${activeUser?.heightUnit || 'cm'}`],
+              ['Weight', `${activeUser?.weight || '68'} ${activeUser?.weightUnit || 'kg'}`],
+              ['Blood Group', activeUser?.bloodGroup || 'O+'],
+              [
+                'Allergies',
+                activeUser?.allergies && activeUser.allergies.length > 0
+                  ? activeUser.allergies.join(', ')
+                  : 'None recorded',
+              ],
+              [
+                'Existing Conditions',
+                activeUser?.existingConditions && activeUser.existingConditions.length > 0
+                  ? activeUser.existingConditions.join(', ')
+                  : 'None recorded',
+              ],
+              [
+                'Current Medications',
+                activeUser?.currentMedications && activeUser.currentMedications.length > 0
+                  ? activeUser.currentMedications.join(', ')
+                  : 'None recorded',
+              ],
+              ['Emergency Contact', activeUser?.emergencyContact || 'Not provided'],
+              ['Health ID (ABHA mock)', activeUser?.abhaId || '91-4820-1928-3341'],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between py-2.5">
                 <dt className="text-slate-500 font-medium">{k}</dt>
-                <dd className="font-bold text-slate-900">{v}</dd>
+                <dd className="font-bold text-slate-900 text-right max-w-[210px] sm:max-w-xs truncate">{v}</dd>
               </div>
             ))}
           </dl>
@@ -1906,8 +2255,8 @@ export function Profile({
           <Eyebrow className="mb-3">{L('Health Record Statistics', 'स्वास्थ्य रिकॉर्ड आँकड़े')}</Eyebrow>
           <div className="grid grid-cols-2 gap-3">
             {[
-              ['Health Conditions', '4', Activity],
-              ['Prescribed Meds', '4', Pill],
+              ['Health Conditions', activeUser?.existingConditions?.length ? String(activeUser.existingConditions.length) : '4', Activity],
+              ['Prescribed Meds', activeUser?.currentMedications?.length ? String(activeUser.currentMedications.length) : '4', Pill],
               ['Lab Observations', '18', FlaskConical],
               ['Verified Reports', '4', FileText],
             ].map(([k, v, I]) => {

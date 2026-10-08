@@ -12,5 +12,14 @@
     "start": "node server.ts",
     "preview": "npm run preview --workspace=frontend",
     "lint": "npm run lint --workspace=frontend"
+  },
+  "dependencies": {
+    "@types/pg": "^8.23.1",
+    "dotenv": "^18.0.6",
+    "drizzle-kit": "^0.31.11",
+    "drizzle-orm": "^0.45.3",
+    "firebase": "^13.0.0",
+    "firebase-admin": "^14.5.0",
+    "pg": "^8.23.1"
   }
 }

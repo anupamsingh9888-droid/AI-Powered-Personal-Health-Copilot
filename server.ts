@@ -2,16 +2,12 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { handleApiRoute } from './src/api/router.ts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const PORT = parseInt(
-  process.env.APP_PORT ||
-  process.env.DEFAULT_APP_PORT ||
-  (process.env.PORT && process.env.PORT !== '8080' ? process.env.PORT : '3000'),
-  10
-)
+const PORT = parseInt(process.env.PORT || '3000', 10)
 const HOST = '0.0.0.0'
 
 function getDistDir(): string {
@@ -62,6 +58,18 @@ const server = http.createServer((req, res) => {
       'Cache-Control': 'no-cache, no-store, must-revalidate',
     })
     res.end(method === 'HEAD' ? undefined : 'OK')
+    return
+  }
+
+  // Handle Backend API endpoints backed by Cloud SQL PostgreSQL
+  if (urlPath.startsWith('/api/')) {
+    handleApiRoute(req, res).catch((err) => {
+      console.error('[API Error]:', err)
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Internal API Server Error' }))
+      }
+    })
     return
   }
 

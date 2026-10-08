@@ -13,6 +13,11 @@ export interface UserHealthProfile {
   weight?: string
   weightUnit?: string
   bloodGroup?: string
+  dateOfBirth?: string
+  allergies?: string[]
+  existingConditions?: string[]
+  currentMedications?: string[]
+  emergencyContact?: string
   onboarded?: boolean
   hasRecords?: boolean
 }

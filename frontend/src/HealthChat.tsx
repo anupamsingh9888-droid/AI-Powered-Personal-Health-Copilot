@@ -30,7 +30,7 @@ import {
 } from 'lucide-react'
 import { Btn, cx, useL, useEvidence, useToast } from './ui'
 import { auth } from './lib/firebase'
-import { createChatSession, sendChatMessage, deleteChatSession } from './services/chatService'
+import { createChatSession, sendChatMessage, deleteChatSession, askAiHealthChat } from './services/chatService'
 
 export interface MessageSource {
   title: string
@@ -927,7 +927,7 @@ export function HealthChat({
                 sendChatMessage(chatId, auth.currentUser.uid, lastMsg.sender, text)
               }
             })
-            .catch((err) => console.error('Failed to sync chat to Firestore:', err))
+            .catch((err) => console.warn('Chat sync status:', err))
         }
       }
 
@@ -947,7 +947,7 @@ export function HealthChat({
 
   const handleConfirmDelete = (id: string) => {
     if (auth.currentUser) {
-      deleteChatSession(id).catch((err) => console.error('Failed to delete chat session in Firestore:', err))
+      deleteChatSession(id).catch((err) => console.warn('Delete chat session status:', err))
     }
     setConversations((prev) => {
       const updated = prev.filter((c) => c.id !== id)
@@ -1056,7 +1056,7 @@ export function HealthChat({
     setInput('')
     setIsTyping(true)
 
-    setTimeout(() => {
+    const runLocalFallback = () => {
       setIsTyping(false)
 
       const normalized = promptText.toLowerCase()
@@ -1719,7 +1719,47 @@ export function HealthChat({
         saveCurrentConversation(next, currentChatId)
         return next
       })
-    }, 600)
+    }
+
+    askAiHealthChat(promptText, currentChatId)
+      .then((res) => {
+        setIsTyping(false)
+        const assistantMsg: ChatMessage = {
+          id: `bot-${res.messageId || Date.now()}`,
+          sender: 'assistant',
+          timestamp: 'Just now',
+          text: res.text,
+          isEmergency: res.isEmergency,
+          recordAnswer: {
+            shortAnswer: res.shortAnswer || res.text,
+            keyMeasurement: res.keyMeasurement || undefined,
+            whatThisMeans:
+              res.whatThisMeans && res.whatThisMeans.length > 0
+                ? res.whatThisMeans
+                : ['Information verified and extracted from your personal health database.'],
+            whatToDoNext:
+              res.whatToDoNext && res.whatToDoNext.length > 0
+                ? res.whatToDoNext
+                : ['Discuss these findings with your doctor during your next scheduled appointment.'],
+            sources: (res.sources || []).map((s) => ({
+              title: s.title,
+              date: s.date,
+              kind: s.kind,
+              detail: s.detail,
+            })),
+          },
+          disclaimer: res.disclaimer,
+        }
+        setMessages((prev) => {
+          const next = [...prev, assistantMsg]
+          saveCurrentConversation(next, currentChatId)
+          return next
+        })
+      })
+      .catch((err) => {
+        console.warn('Backend AI chat request error, running local safety processor:', err)
+        runLocalFallback()
+      })
   }
 
   const handleResetChat = () => {

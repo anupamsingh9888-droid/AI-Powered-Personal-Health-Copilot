@@ -130,3 +130,44 @@ export async function deleteChatSession(sessionId: string): Promise<void> {
     }).catch((err) => console.warn('Could not delete chat session from PostgreSQL:', err))
   }
 }
+
+export interface AiChatAskResult {
+  sessionId: number
+  messageId: number
+  sender: 'assistant'
+  text: string
+  shortAnswer: string
+  keyMeasurement?: {
+    label: string
+    value: string
+    context?: string
+  } | null
+  whatThisMeans: string[]
+  whatToDoNext: string[]
+  sources: Array<{
+    title: string
+    date: string
+    kind: 'lab' | 'rx' | 'vitals' | 'device'
+    detail?: string
+  }>
+  isEmergency: boolean
+  triageLevel: 'none' | 'routine' | 'urgent' | 'emergency'
+  disclaimer: string
+  createdAt: string
+}
+
+export async function askAiHealthChat(
+  message: string,
+  sessionId?: string | number
+): Promise<AiChatAskResult> {
+  const cleanId = sessionId ? parseInt(String(sessionId).replace(/\D/g, ''), 10) : undefined
+  const result = await apiRequest<AiChatAskResult>('/api/chat/ask', {
+    method: 'POST',
+    body: JSON.stringify({
+      message,
+      sessionId: cleanId && !isNaN(cleanId) ? cleanId : undefined,
+    }),
+  })
+  return result
+}
+

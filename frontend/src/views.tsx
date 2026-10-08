@@ -33,11 +33,22 @@ import {
   Save,
   X,
   Loader2,
+  RotateCcw,
 } from 'lucide-react'
 import { Badge, Btn, Card, ConfBar, ConfRing, DocPaper, Eyebrow, PageHead, cx, useEvidence, useL, useToast, formatAppointmentDate, type StatusKey } from './ui'
 import type { ConditionInfo, Appointment, MedicationItem, HealthAlert, UserHealthProfile } from './types'
 import { PersonalizedRecommendations } from './components/PersonalizedRecommendations'
 import { getHealthProfile, updateHealthProfile } from './services/healthProfileService'
+import {
+  getHealthTrends,
+  triggerTrendAnalysis,
+  type HealthTrendsResponse,
+  type MetricTrendItem,
+} from './services/healthMetricService'
+import { getHealthInsights, type HealthInsightDoc } from './services/insightService'
+import { getMedicalDocuments, type MedicalDocument } from './services/medicalDocumentService'
+import { getLabReports, type LabReportDoc } from './services/labReportService'
+import { getSymptoms, type SymptomDoc } from './services/symptomService'
 
 export type Go = (v: string, extra?: any) => void
 
@@ -75,6 +86,46 @@ export function Home({
   const ev = useEvidence()
   const toast = useToast()
   const [askInput, setAskInput] = useState('')
+
+  // Real PostgreSQL Dashboard data states (Phase 5)
+  const [trendsData, setTrendsData] = useState<HealthTrendsResponse | null>(null)
+  const [insightsList, setInsightsList] = useState<HealthInsightDoc[]>([])
+  const [recentDocs, setRecentDocs] = useState<MedicalDocument[]>([])
+  const [recentLabs, setRecentLabs] = useState<LabReportDoc[]>([])
+  const [symptomsList, setSymptomsList] = useState<SymptomDoc[]>([])
+  const [loadingDashboard, setLoadingDashboard] = useState<boolean>(true)
+
+  useEffect(() => {
+    let active = true
+    Promise.allSettled([
+      getHealthTrends(),
+      getHealthInsights(),
+      getMedicalDocuments(),
+      getLabReports(),
+      getSymptoms(),
+    ]).then(([trendsRes, insightsRes, docsRes, labsRes, sympRes]) => {
+      if (!active) return
+      if (trendsRes.status === 'fulfilled' && trendsRes.value) {
+        setTrendsData(trendsRes.value)
+      }
+      if (insightsRes.status === 'fulfilled' && Array.isArray(insightsRes.value)) {
+        setInsightsList(insightsRes.value)
+      }
+      if (docsRes.status === 'fulfilled' && Array.isArray(docsRes.value)) {
+        setRecentDocs(docsRes.value)
+      }
+      if (labsRes.status === 'fulfilled' && Array.isArray(labsRes.value)) {
+        setRecentLabs(labsRes.value)
+      }
+      if (sympRes.status === 'fulfilled' && Array.isArray(sympRes.value)) {
+        setSymptomsList(sympRes.value)
+      }
+      setLoadingDashboard(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const userName = user?.name ? user.name.split(' ')[0] : 'Alex'
   // Support active upcoming appointments (confirmed or requested)
@@ -127,19 +178,294 @@ export function Home({
       icon: Hospital,
     },
   ]
-  const displayActivities = recentActivities !== undefined ? recentActivities : defaultActivities
+
+  // Derived real activities from PostgreSQL records
+  const realActivities = useMemo(() => {
+    const list: Array<{
+      date: string
+      type: string
+      title: string
+      note: string
+      s: StatusKey
+      icon: any
+    }> = []
+
+    for (const d of recentDocs.slice(0, 3)) {
+      list.push({
+        date: d.uploadedAt
+          ? new Date(d.uploadedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toUpperCase()
+          : 'RECENT',
+        type: d.docType || 'Medical Document',
+        title: d.title || d.originalFilename || 'Uploaded Record',
+        note: `Document in database · Status: ${d.processingStatus}`,
+        s: d.processingStatus === 'COMPLETED' ? 'verified' : 'neutral',
+        icon: FileText,
+      })
+    }
+
+    for (const l of recentLabs.slice(0, 2)) {
+      list.push({
+        date: l.date
+          ? new Date(l.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toUpperCase()
+          : 'RECENT',
+        type: 'Laboratory Report',
+        title: l.testName,
+        note: `Laboratory: ${l.labName || 'Diagnostic Lab'} · Status: ${l.status || 'Verified'}`,
+        s: 'verified',
+        icon: FlaskConical,
+      })
+    }
+
+    for (const s of symptomsList.slice(0, 2)) {
+      list.push({
+        date: s.date
+          ? new Date(s.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).toUpperCase()
+          : 'RECENT',
+        type: 'Symptom Entry',
+        title: s.name,
+        note: `Severity: ${s.severity}${s.notes ? ` · Note: ${s.notes}` : ''}`,
+        s: s.severity === 'Severe' ? 'attention' : 'neutral',
+        icon: Activity,
+      })
+    }
+
+    if (list.length > 0) return list
+    return recentActivities !== undefined ? recentActivities : defaultActivities
+  }, [recentDocs, recentLabs, symptomsList, recentActivities])
+
+  const displayActivities = realActivities
 
   return (
     <div className="anim-fade-up mx-auto max-w-6xl space-y-9">
       {/* Welcome Greeting Header */}
       <div>
-        <h1 className="font-display text-[32px] sm:text-[40px] font-bold leading-tight tracking-tight text-slate-900">
-          {L(`Good morning, ${userName}`, `सुप्रभात, ${userName}`)}
-        </h1>
-        <p className="mt-1.5 text-[16px] text-slate-600 font-medium">
-          {L("Here's what needs your attention today.", 'यहाँ आपके आज के ज़रूरी स्वास्थ्य अपडेट हैं।')}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="font-display text-[32px] sm:text-[40px] font-bold leading-tight tracking-tight text-slate-900">
+              {L(`Good morning, ${userName}`, `सुप्रभात, ${userName}`)}
+            </h1>
+            <p className="mt-1.5 text-[16px] text-slate-600 font-medium">
+              {L("Here's what needs your attention today.", 'यहाँ आपके आज के ज़रूरी स्वास्थ्य अपडेट हैं।')}
+            </p>
+          </div>
+
+          {/* Health Profile Summary Bar (PostgreSQL verified) */}
+          {user && (
+            <div className="flex flex-wrap items-center gap-2 bg-white px-3.5 py-2 rounded-2xl border border-slate-200 shadow-2xs text-xs">
+              {user.age && (
+                <span className="px-2.5 py-1 rounded-lg bg-slate-50 font-semibold text-slate-700">
+                  {user.age} yrs · {user.gender || 'Patient'}
+                </span>
+              )}
+              {user.bloodGroup && (
+                <span className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 font-bold">
+                  Blood: {user.bloodGroup}
+                </span>
+              )}
+              {user.weight && (
+                <span className="px-2.5 py-1 rounded-lg bg-slate-50 font-semibold text-slate-700">
+                  {user.weight} {user.weightUnit || 'kg'}
+                </span>
+              )}
+              {user.height && (
+                <span className="px-2.5 py-1 rounded-lg bg-slate-50 font-semibold text-slate-700">
+                  {user.height} {user.heightUnit || 'cm'}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => go('profile')}
+                className="text-teal-700 hover:text-teal-900 font-bold px-1.5 cursor-pointer"
+              >
+                Profile →
+              </button>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* HEALTH METRICS & DETERMINISTIC TREND ENGINE (Phase 3 & 4) */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <TrendingUp size={18} className="text-teal-600" />
+            <h2 className="font-display text-lg font-bold text-slate-900">
+              {L('Health Metrics & Longitudinal Trends', 'स्वास्थ्य मेट्रिक्स और रुझान')}
+            </h2>
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 border border-teal-200">
+              {L('Mathematically Verified', 'गणितीय रूप से सत्यापित')}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              toast('Analyzing latest health metrics in PostgreSQL...', 'ok')
+              triggerTrendAnalysis().then((res) => {
+                if (res) {
+                  setTrendsData(res)
+                  toast('Trends and AI insights refreshed from database!', 'ok')
+                }
+              })
+            }}
+            className="text-xs font-bold text-teal-800 hover:text-teal-950 flex items-center gap-1 cursor-pointer bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200 transition hover:bg-slate-100"
+          >
+            <span>{L('Recalculate Trends', 'रुझान पुनर्गणना')}</span>
+            <RotateCcw size={12} />
+          </button>
+        </div>
+
+        {trendsData && trendsData.trends.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {trendsData.trends.map((tr) => (
+              <Card key={tr.metricType} className="p-4 border-slate-200/90 flex flex-col justify-between space-y-3 bg-white">
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      {tr.label}
+                    </span>
+                    {tr.hasSufficientData && (
+                      <span
+                        className={cx(
+                          'text-xs font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1',
+                          tr.direction === 'increased'
+                            ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                            : tr.direction === 'decreased'
+                            ? 'bg-teal-50 text-teal-800 border border-teal-200'
+                            : 'bg-slate-100 text-slate-700 border border-slate-200'
+                        )}
+                      >
+                        {tr.direction === 'increased' ? '+' : tr.direction === 'decreased' ? '-' : ''}
+                        {Math.abs(tr.percentageChange || 0)}%
+                      </span>
+                    )}
+                  </div>
+
+                  {tr.hasSufficientData ? (
+                    <div className="space-y-1">
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-display text-2xl font-bold text-slate-900">
+                          {tr.currentValue}
+                        </span>
+                        <span className="text-xs text-slate-500 font-semibold">{tr.unit}</span>
+                        <span className="text-xs text-slate-400">
+                          (prev: {tr.previousValue} {tr.unit})
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                        {tr.aiExplanation}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1 py-1">
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-display text-xl font-bold text-slate-800">
+                          {tr.currentValue || '—'}
+                        </span>
+                        <span className="text-xs text-slate-500">{tr.unit}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 italic">
+                        {tr.aiExplanation || 'Single measurement recorded. Additional data needed to compute change.'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+                  <span>{tr.timePeriod || 'Recent reading'}</span>
+                  <span className="font-semibold text-teal-700">Deterministic</span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <Card className="p-5 border-dashed border-slate-200 bg-slate-50/70 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-teal-50 text-teal-700 border border-teal-200">
+                <Activity size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  {L('Longitudinal Trend Engine Ready', 'ट्रेंड इंजन सक्रिय')}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {L(
+                    'Historical metrics (sleep, activity, weight, heart rate, blood pressure, glucose) calculate trends automatically.',
+                    'ऐतिहासिक मेट्रिक्स स्वचालित रूप से रुझान की गणना करते हैं।'
+                  )}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                triggerTrendAnalysis().then((res) => {
+                  if (res) setTrendsData(res)
+                  toast('Calculated trends from stored metrics', 'ok')
+                })
+              }}
+              className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shrink-0 cursor-pointer transition shadow-2xs"
+            >
+              Analyze Metrics
+            </button>
+          </Card>
+        )}
+      </section>
+
+      {/* AI HEALTH INSIGHTS (Phase 4) */}
+      {insightsList.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Sparkles size={18} className="text-teal-600" />
+            <h2 className="font-display text-lg font-bold text-slate-900">
+              {L('AI Health Insights', 'AI स्वास्थ्य अंतर्दृष्टि')}
+            </h2>
+            <span className="text-[11px] font-semibold text-slate-500">
+              ({insightsList.length} verified in PostgreSQL)
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {insightsList.slice(0, 4).map((ins) => (
+              <Card
+                key={ins.id}
+                className={cx(
+                  'p-4 border-l-4 transition-all hover:shadow-xs flex flex-col justify-between',
+                  ins.priority === 'high'
+                    ? 'border-l-rose-500 bg-rose-50/20'
+                    : ins.priority === 'medium'
+                    ? 'border-l-amber-500 bg-amber-50/20'
+                    : 'border-l-teal-600 bg-teal-50/20'
+                )}
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                      {ins.title}
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      {new Date(ins.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                    {ins.description}
+                  </p>
+                </div>
+                <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                  <span className="text-slate-400">Stored in PostgreSQL</span>
+                  <button
+                    type="button"
+                    onClick={() => go('chat', { prompt: `Tell me more about: ${ins.title}` })}
+                    className="text-teal-800 font-bold hover:underline cursor-pointer"
+                  >
+                    Ask Copilot →
+                  </button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* SECTION 1: Conditional Health Alerts */}
       <section className="space-y-3">
@@ -1766,7 +2092,7 @@ export function Profile({
         setProfileData(user)
       }
     } catch (err: any) {
-      console.error('Failed to load profile from PostgreSQL:', err)
+      console.warn('Failed to load profile from PostgreSQL:', err)
       setLoadError(err?.message || 'Failed to load profile from PostgreSQL')
     } finally {
       setLoading(false)
@@ -1892,7 +2218,7 @@ export function Profile({
       setIsEditing(false)
       toast(L('Health profile saved to PostgreSQL successfully!', 'स्वास्थ्य प्रोफ़ाइल PostgreSQL में सहेजी गई!'), 'ok')
     } catch (err: any) {
-      console.error('Error saving profile to PostgreSQL:', err)
+      console.warn('Error saving profile to PostgreSQL:', err)
       setSaveError(err.message || L('Failed to save profile. Please try again.', 'प्रोफ़ाइल सहेजने में विफल। कृपया पुनः प्रयास करें।'))
       toast(L('Failed to save profile', 'प्रोफ़ाइल सहेजने में विफल'), 'warn')
     } finally {

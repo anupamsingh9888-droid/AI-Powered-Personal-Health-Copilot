@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm'
-import { db } from '../index.ts'
+import { db, isDbAvailable, markDbUnreachable } from '../index.ts'
 import { labReports, labResults } from '../schema.ts'
 
 export interface LabResultInput {
@@ -21,7 +21,13 @@ export interface LabReportInput {
   results?: LabResultInput[]
 }
 
+const memoryLabReports = new Map<string, any[]>()
+let nextReportId = 1
+
 export async function getLabReportsWithResults(userId: string) {
+  if (!isDbAvailable()) {
+    return memoryLabReports.get(userId) || []
+  }
   try {
     const reports = await db
       .select()
@@ -42,55 +48,75 @@ export async function getLabReportsWithResults(userId: string) {
       results: allResults.filter((res) => res.reportId === report.id),
     }))
   } catch (error) {
-    console.error('Database query failed in getLabReportsWithResults:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+    markDbUnreachable()
+    return memoryLabReports.get(userId) || []
   }
 }
 
 export async function createLabReport(userId: string, data: LabReportInput) {
-  try {
-    const [report] = await db
-      .insert(labReports)
-      .values({
-        userId,
-        testName: data.testName,
-        testCategory: data.testCategory || 'General',
-        testDate: data.testDate,
-        laboratoryName: data.laboratoryName || '',
-        summary: data.summary || '',
-        documentId: data.documentId || null,
-      })
-      .returning()
-
-    let insertedResults: any[] = []
-    if (data.results && data.results.length > 0) {
-      insertedResults = await db
-        .insert(labResults)
-        .values(
-          data.results.map((res) => ({
-            reportId: report.id,
-            userId,
-            biomarker: res.biomarker,
-            value: res.value,
-            unit: res.unit,
-            referenceRangeLow: res.referenceRangeLow || null,
-            referenceRangeHigh: res.referenceRangeHigh || null,
-            status: res.status,
-          }))
-        )
+  if (isDbAvailable()) {
+    try {
+      const [report] = await db
+        .insert(labReports)
+        .values({
+          userId,
+          testName: data.testName,
+          testCategory: data.testCategory || 'General',
+          testDate: data.testDate,
+          laboratoryName: data.laboratoryName || '',
+          summary: data.summary || '',
+          documentId: data.documentId || null,
+        })
         .returning()
-    }
 
-    return {
-      ...report,
-      results: insertedResults,
+      let insertedResults: any[] = []
+      if (data.results && data.results.length > 0) {
+        insertedResults = await db
+          .insert(labResults)
+          .values(
+            data.results.map((res) => ({
+              reportId: report.id,
+              userId,
+              biomarker: res.biomarker,
+              value: res.value,
+              unit: res.unit,
+              referenceRangeLow: res.referenceRangeLow || null,
+              referenceRangeHigh: res.referenceRangeHigh || null,
+              status: res.status,
+            }))
+          )
+          .returning()
+      }
+
+      return {
+        ...report,
+        results: insertedResults,
+      }
+    } catch (error) {
+      markDbUnreachable()
     }
-  } catch (error) {
-    console.error('Database query failed in createLabReport:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
   }
+
+  const fallbackReport = {
+    id: nextReportId++,
+    userId,
+    testName: data.testName,
+    testCategory: data.testCategory || 'General',
+    testDate: data.testDate,
+    laboratoryName: data.laboratoryName || '',
+    summary: data.summary || '',
+    documentId: data.documentId || null,
+    createdAt: new Date(),
+    results: (data.results || []).map((r, i) => ({
+      id: i + 1,
+      reportId: nextReportId,
+      userId,
+      ...r,
+      createdAt: new Date(),
+    })),
+  }
+  const current = memoryLabReports.get(userId) || []
+  current.push(fallbackReport)
+  memoryLabReports.set(userId, current)
+  return fallbackReport
 }

@@ -246,7 +246,7 @@ export default function App() {
             await seedInitialMedications(fbUser.uid, INITIAL_MEDICATIONS)
           }
         } catch (err) {
-          console.error('Firebase Auth/Firestore sync error:', err)
+          console.warn('Firebase Auth/Firestore sync warning:', err)
         }
       }
     })
@@ -294,7 +294,7 @@ export default function App() {
         await saveHealthProfile(auth.currentUser.uid, data)
         await syncUserToFirestore(auth.currentUser)
       } catch (err) {
-        console.error('Failed to save profile to Firestore:', err)
+        console.warn('Could not save profile to backend:', err)
       }
     }
 
@@ -327,7 +327,7 @@ export default function App() {
         const skipped = action === 'skip'
         if (auth.currentUser) {
           updateMedicationAdherence(m.id, taken, skipped).catch((err) =>
-            console.error('Failed to update medication adherence in Firestore:', err)
+            console.warn('Could not update medication adherence:', err)
           )
         }
         if (action === 'taken') {
@@ -357,7 +357,7 @@ export default function App() {
         date: `${newApt.date} ${newApt.time}`,
         doctor: newApt.doctorName,
         notes: `${newApt.clinic}. Notes: ${newApt.notes || 'None'}. Status: ${newApt.status}`,
-      }).catch((err) => console.error('Failed to create health record in Firestore:', err))
+      }).catch((err) => console.warn('Could not create health record:', err))
     }
     // Update dashboard alert
     setAlerts((prev) => [

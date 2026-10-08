@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm'
-import { db } from '../index.ts'
+import { db, isDbConfigured, isDbAvailable, markDbUnreachable } from '../index.ts'
 import { symptoms } from '../schema.ts'
 
 export interface SymptomInput {
@@ -11,7 +11,13 @@ export interface SymptomInput {
   notes?: string
 }
 
+const memorySymptoms = new Map<string, any[]>()
+let nextSymptomId = 1
+
 export async function getSymptoms(userId: string) {
+  if (!isDbAvailable()) {
+    return memorySymptoms.get(userId) || []
+  }
   try {
     return await db
       .select()
@@ -19,50 +25,68 @@ export async function getSymptoms(userId: string) {
       .where(eq(symptoms.userId, userId))
       .orderBy(symptoms.startedAt)
   } catch (error) {
-    console.error('Database query failed in getSymptoms:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+    markDbUnreachable()
+    return memorySymptoms.get(userId) || []
   }
 }
 
 export async function createSymptom(userId: string, data: SymptomInput) {
-  try {
-    const started = data.startedAt ? new Date(data.startedAt) : new Date()
-    const resolved = data.resolvedAt ? new Date(data.resolvedAt) : null
+  const started = data.startedAt ? new Date(data.startedAt) : new Date()
+  const resolved = data.resolvedAt ? new Date(data.resolvedAt) : null
 
-    const result = await db
-      .insert(symptoms)
-      .values({
-        userId,
-        symptomName: data.symptomName,
-        severity: data.severity,
-        startedAt: started,
-        resolvedAt: resolved,
-        bodyPart: data.bodyPart || '',
-        notes: data.notes || '',
-      })
-      .returning()
+  if (isDbAvailable()) {
+    try {
+      const result = await db
+        .insert(symptoms)
+        .values({
+          userId,
+          symptomName: data.symptomName,
+          severity: data.severity,
+          startedAt: started,
+          resolvedAt: resolved,
+          bodyPart: data.bodyPart || '',
+          notes: data.notes || '',
+        })
+        .returning()
 
-    return result[0]
-  } catch (error) {
-    console.error('Database query failed in createSymptom:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+      return result[0]
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+
+  const fallback = {
+    id: nextSymptomId++,
+    userId,
+    symptomName: data.symptomName,
+    severity: data.severity,
+    startedAt: started,
+    resolvedAt: resolved,
+    bodyPart: data.bodyPart || '',
+    notes: data.notes || '',
+    createdAt: new Date(),
+  }
+  const current = memorySymptoms.get(userId) || []
+  current.push(fallback)
+  memorySymptoms.set(userId, current)
+  return fallback
 }
 
 export async function deleteSymptom(userId: string, id: number) {
-  try {
-    await db
-      .delete(symptoms)
-      .where(and(eq(symptoms.id, id), eq(symptoms.userId, userId)))
-    return true
-  } catch (error) {
-    console.error('Database query failed in deleteSymptom:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+  if (isDbAvailable()) {
+    try {
+      await db
+        .delete(symptoms)
+        .where(and(eq(symptoms.id, id), eq(symptoms.userId, userId)))
+      return true
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+  const current = memorySymptoms.get(userId) || []
+  memorySymptoms.set(
+    userId,
+    current.filter((s) => s.id !== id)
+  )
+  return true
 }

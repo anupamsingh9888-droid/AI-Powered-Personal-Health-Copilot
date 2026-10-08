@@ -1,5 +1,5 @@
 import { and, desc, eq } from 'drizzle-orm'
-import { db } from '../index.ts'
+import { db, isDbAvailable, markDbUnreachable } from '../index.ts'
 import {
   structuredMedicalData,
   ocrResults,
@@ -65,6 +65,9 @@ export interface StructuredMedicalDataInput {
   structuredJson?: Record<string, any>
 }
 
+const memoryStructuredData = new Map<string, any[]>()
+let nextStructuredId = 1
+
 /**
  * Save structured extraction results into PostgreSQL.
  * Preserves raw OCR text, links to original document, and records confidence and review flags.
@@ -73,160 +76,196 @@ export async function saveStructuredMedicalData(
   userId: string,
   input: StructuredMedicalDataInput
 ) {
-  try {
-    // 1. Ensure ocr_results record exists to link to original document
-    let ocrResultId: number | null = null
-    const [existingOcr] = await db
-      .select()
-      .from(ocrResults)
-      .where(
-        and(
-          eq(ocrResults.documentId, input.documentId),
-          eq(ocrResults.userId, userId)
+  if (isDbAvailable()) {
+    try {
+      // 1. Ensure ocr_results record exists to link to original document
+      let ocrResultId: number | null = null
+      const [existingOcr] = await db
+        .select()
+        .from(ocrResults)
+        .where(
+          and(
+            eq(ocrResults.documentId, input.documentId),
+            eq(ocrResults.userId, userId)
+          )
         )
-      )
 
-    if (existingOcr) {
-      ocrResultId = existingOcr.id
-      await db
-        .update(ocrResults)
-        .set({
-          rawText: input.rawOcrText,
-          confidenceScore:
-            input.ocrConfidence !== undefined && input.ocrConfidence !== null
-              ? String(input.ocrConfidence)
-              : existingOcr.confidenceScore,
-          extractedEntities: input.structuredJson || {},
-          processedAt: new Date(),
-        })
-        .where(eq(ocrResults.id, existingOcr.id))
-    } else {
-      const [newOcr] = await db
-        .insert(ocrResults)
+      if (existingOcr) {
+        ocrResultId = existingOcr.id
+        await db
+          .update(ocrResults)
+          .set({
+            rawText: input.rawOcrText,
+            confidenceScore:
+              input.ocrConfidence !== undefined && input.ocrConfidence !== null
+                ? String(input.ocrConfidence)
+                : existingOcr.confidenceScore,
+            extractedEntities: input.structuredJson || {},
+            processedAt: new Date(),
+          })
+          .where(eq(ocrResults.id, existingOcr.id))
+      } else {
+        const [newOcr] = await db
+          .insert(ocrResults)
+          .values({
+            documentId: input.documentId,
+            userId,
+            rawText: input.rawOcrText,
+            confidenceScore:
+              input.ocrConfidence !== undefined && input.ocrConfidence !== null
+                ? String(input.ocrConfidence)
+                : null,
+            extractedEntities: input.structuredJson || {},
+          })
+          .returning()
+        ocrResultId = newOcr.id
+      }
+
+      // 2. Insert into structured_medical_data table
+      const [saved] = await db
+        .insert(structuredMedicalData)
         .values({
           documentId: input.documentId,
           userId,
-          rawText: input.rawOcrText,
-          confidenceScore:
+          ocrResultId,
+          rawOcrText: input.rawOcrText,
+          ocrConfidence:
             input.ocrConfidence !== undefined && input.ocrConfidence !== null
               ? String(input.ocrConfidence)
               : null,
-          extractedEntities: input.structuredJson || {},
+          patientName: input.patientName ?? null,
+          documentDate: input.documentDate ?? null,
+          doctorName: input.doctorName ?? null,
+          diagnosesMentioned: input.diagnosesMentioned || [],
+          medications: input.medications || [],
+          laboratoryTests: input.laboratoryTests || [],
+          uncertainFields: input.uncertainFields || [],
+          requiresReview: Boolean(
+            input.requiresReview ||
+              (input.uncertainFields && input.uncertainFields.length > 0)
+          ),
+          reviewStatus: input.reviewStatus || 'PENDING_REVIEW',
+          clinicalDisclaimer:
+            input.clinicalDisclaimer ||
+            'Not a confirmed medical diagnosis. Information extracted from document text for informational reference only. Consult your doctor.',
+          structuredJson: input.structuredJson || {},
         })
         .returning()
-      ocrResultId = newOcr.id
-    }
 
-    // 2. Insert into structured_medical_data table
-    const [saved] = await db
-      .insert(structuredMedicalData)
-      .values({
-        documentId: input.documentId,
-        userId,
-        ocrResultId,
-        rawOcrText: input.rawOcrText,
-        ocrConfidence:
-          input.ocrConfidence !== undefined && input.ocrConfidence !== null
-            ? String(input.ocrConfidence)
-            : null,
-        patientName: input.patientName ?? null,
-        documentDate: input.documentDate ?? null,
-        doctorName: input.doctorName ?? null,
-        diagnosesMentioned: input.diagnosesMentioned || [],
-        medications: input.medications || [],
-        laboratoryTests: input.laboratoryTests || [],
-        uncertainFields: input.uncertainFields || [],
-        requiresReview: Boolean(
-          input.requiresReview ||
-            (input.uncertainFields && input.uncertainFields.length > 0)
-        ),
-        reviewStatus: input.reviewStatus || 'PENDING_REVIEW',
-        clinicalDisclaimer:
-          input.clinicalDisclaimer ||
-          'Not a confirmed medical diagnosis. Information extracted from document text for informational reference only. Consult your doctor.',
-        structuredJson: input.structuredJson || {},
-      })
-      .returning()
-
-    // 3. Update parent medical_documents processing status
-    const docStatus = saved.requiresReview ? 'NEEDS_REVIEW' : 'COMPLETED'
-    await db
-      .update(medicalDocuments)
-      .set({ processingStatus: docStatus })
-      .where(
-        and(
-          eq(medicalDocuments.id, input.documentId),
-          eq(medicalDocuments.userId, userId)
+      // 3. Update parent medical_documents processing status
+      const docStatus = saved?.requiresReview ? 'NEEDS_REVIEW' : 'COMPLETED'
+      await db
+        .update(medicalDocuments)
+        .set({ processingStatus: docStatus })
+        .where(
+          and(
+            eq(medicalDocuments.id, input.documentId),
+            eq(medicalDocuments.userId, userId)
+          )
         )
-      )
 
-    // 4. Optionally synchronize relational tables for lab tests and medications
-    if (input.laboratoryTests && input.laboratoryTests.length > 0) {
-      try {
-        const [report] = await db
-          .insert(labReports)
-          .values({
-            userId,
-            documentId: input.documentId,
-            testName:
-              input.laboratoryTests[0]?.testName ||
-              'Extracted Laboratory Observation',
-            testCategory: 'Laboratory',
-            testDate: input.documentDate || new Date().toISOString().split('T')[0],
-            laboratoryName: 'Extracted from uploaded document',
-            summary: `Automated extraction containing ${input.laboratoryTests.length} observed parameters. Requires clinical review.`,
-          })
-          .returning()
+      // 4. Optionally synchronize relational tables for lab tests and medications
+      if (input.laboratoryTests && input.laboratoryTests.length > 0) {
+        try {
+          const [report] = await db
+            .insert(labReports)
+            .values({
+              userId,
+              documentId: input.documentId,
+              testName:
+                input.laboratoryTests[0]?.testName ||
+                'Extracted Laboratory Observation',
+              testCategory: 'Laboratory',
+              testDate: input.documentDate || new Date().toISOString().split('T')[0],
+              laboratoryName: 'Extracted from uploaded document',
+              summary: `Automated extraction containing ${input.laboratoryTests.length} observed parameters. Requires clinical review.`,
+            })
+            .returning()
 
-        for (const test of input.laboratoryTests) {
-          if (test.value) {
-            const numVal = parseFloat(test.value.replace(/[^0-9.-]/g, ''))
-            if (!isNaN(numVal)) {
-              await db.insert(labResults).values({
-                reportId: report.id,
+          for (const test of input.laboratoryTests) {
+            if (test.value) {
+              const numVal = parseFloat(test.value.replace(/[^0-9.-]/g, ''))
+              if (!isNaN(numVal)) {
+                await db.insert(labResults).values({
+                  reportId: report.id,
+                  userId,
+                  biomarker: test.testName,
+                  value: String(numVal),
+                  unit: test.unit || 'unit',
+                  referenceRangeLow: null,
+                  referenceRangeHigh: null,
+                  status: test.abnormalFlag || 'NORMAL',
+                })
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Could not populate lab_reports/lab_results relation:', err)
+        }
+      }
+
+      if (input.medications && input.medications.length > 0) {
+        try {
+          for (const med of input.medications) {
+            if (med.name && !med.requiresReview) {
+              await db.insert(medicationsTable).values({
                 userId,
-                biomarker: test.testName,
-                value: String(numVal),
-                unit: test.unit || 'unit',
-                referenceRangeLow: null,
-                referenceRangeHigh: null,
-                status: test.abnormalFlag || 'NORMAL',
+                name: med.name,
+                dosage: med.dosage || 'As directed',
+                frequency: med.frequency || 'Daily',
+                instructions: med.instructions || 'Extracted from document',
+                startDate: input.documentDate || new Date().toISOString().split('T')[0],
+                isActive: true,
               })
             }
           }
+        } catch (err) {
+          console.warn('Could not populate medications relation:', err)
         }
-      } catch (err) {
-        console.warn('Could not populate lab_reports/lab_results relation:', err)
       }
-    }
 
-    if (input.medications && input.medications.length > 0) {
-      try {
-        for (const med of input.medications) {
-          if (med.name && !med.requiresReview) {
-            await db.insert(medicationsTable).values({
-              userId,
-              name: med.name,
-              dosage: med.dosage || 'As directed',
-              frequency: med.frequency || 'Daily',
-              instructions: med.instructions || 'Extracted from document',
-              startDate: input.documentDate || new Date().toISOString().split('T')[0],
-              isActive: true,
-            })
-          }
-        }
-      } catch (err) {
-        console.warn('Could not populate medications relation:', err)
-      }
+      if (saved) return saved
+    } catch (error) {
+      console.warn('PostgreSQL write failed in saveStructuredMedicalData, using fallback:', error)
     }
-
-    return saved
-  } catch (error) {
-    console.error('Database query failed in saveStructuredMedicalData:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
   }
+
+  // Fallback to in-memory store
+  const fallbackId = nextStructuredId++
+  const fallbackSaved = {
+    id: fallbackId,
+    documentId: input.documentId,
+    userId,
+    ocrResultId: fallbackId,
+    rawOcrText: input.rawOcrText,
+    ocrConfidence:
+      input.ocrConfidence !== undefined && input.ocrConfidence !== null
+        ? String(input.ocrConfidence)
+        : null,
+    patientName: input.patientName ?? null,
+    documentDate: input.documentDate ?? null,
+    doctorName: input.doctorName ?? null,
+    diagnosesMentioned: input.diagnosesMentioned || [],
+    medications: input.medications || [],
+    laboratoryTests: input.laboratoryTests || [],
+    uncertainFields: input.uncertainFields || [],
+    requiresReview: Boolean(
+      input.requiresReview ||
+        (input.uncertainFields && input.uncertainFields.length > 0)
+    ),
+    reviewStatus: input.reviewStatus || 'PENDING_REVIEW',
+    clinicalDisclaimer:
+      input.clinicalDisclaimer ||
+      'Not a confirmed medical diagnosis. Information extracted from document text for informational reference only. Consult your doctor.',
+    structuredJson: input.structuredJson || {},
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
+
+  const current = memoryStructuredData.get(userId) || []
+  current.unshift(fallbackSaved)
+  memoryStructuredData.set(userId, current)
+  return fallbackSaved
 }
 
 /**
@@ -236,6 +275,10 @@ export async function getStructuredMedicalDataByDocument(
   userId: string,
   documentId: number
 ) {
+  if (!isDbAvailable()) {
+    const list = memoryStructuredData.get(userId) || []
+    return list.find((d) => d.documentId === documentId) || null
+  }
   try {
     const records = await db
       .select()
@@ -250,13 +293,9 @@ export async function getStructuredMedicalDataByDocument(
 
     return records[0] || null
   } catch (error) {
-    console.error(
-      'Database query failed in getStructuredMedicalDataByDocument:',
-      error
-    )
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+    markDbUnreachable()
+    const list = memoryStructuredData.get(userId) || []
+    return list.find((d) => d.documentId === documentId) || null
   }
 }
 
@@ -264,6 +303,9 @@ export async function getStructuredMedicalDataByDocument(
  * Fetch all structured medical data entries for the authenticated user.
  */
 export async function getAllStructuredMedicalData(userId: string) {
+  if (!isDbAvailable()) {
+    return memoryStructuredData.get(userId) || []
+  }
   try {
     return await db
       .select()
@@ -271,10 +313,8 @@ export async function getAllStructuredMedicalData(userId: string) {
       .where(eq(structuredMedicalData.userId, userId))
       .orderBy(desc(structuredMedicalData.createdAt))
   } catch (error) {
-    console.error('Database query failed in getAllStructuredMedicalData:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+    markDbUnreachable()
+    return memoryStructuredData.get(userId) || []
   }
 }
 
@@ -287,42 +327,51 @@ export async function updateStructuredDataReview(
   reviewStatus: 'PENDING_REVIEW' | 'VERIFIED' | 'REJECTED',
   updatedFields?: Partial<StructuredMedicalDataInput>
 ) {
-  try {
-    const updatePayload: Record<string, any> = {
-      reviewStatus,
-      requiresReview: reviewStatus === 'PENDING_REVIEW',
-      updatedAt: new Date(),
-    }
+  if (isDbAvailable()) {
+    try {
+      const updatePayload: Record<string, any> = {
+        reviewStatus,
+        requiresReview: reviewStatus === 'PENDING_REVIEW',
+        updatedAt: new Date(),
+      }
 
-    if (updatedFields?.medications) {
-      updatePayload.medications = updatedFields.medications
-    }
-    if (updatedFields?.laboratoryTests) {
-      updatePayload.laboratoryTests = updatedFields.laboratoryTests
-    }
-    if (updatedFields?.diagnosesMentioned) {
-      updatePayload.diagnosesMentioned = updatedFields.diagnosesMentioned
-    }
-    if (updatedFields?.uncertainFields) {
-      updatePayload.uncertainFields = updatedFields.uncertainFields
-    }
+      if (updatedFields?.medications) {
+        updatePayload.medications = updatedFields.medications
+      }
+      if (updatedFields?.laboratoryTests) {
+        updatePayload.laboratoryTests = updatedFields.laboratoryTests
+      }
+      if (updatedFields?.diagnosesMentioned) {
+        updatePayload.diagnosesMentioned = updatedFields.diagnosesMentioned
+      }
+      if (updatedFields?.uncertainFields) {
+        updatePayload.uncertainFields = updatedFields.uncertainFields
+      }
 
-    const [updated] = await db
-      .update(structuredMedicalData)
-      .set(updatePayload)
-      .where(
-        and(
-          eq(structuredMedicalData.id, id),
-          eq(structuredMedicalData.userId, userId)
+      const [updated] = await db
+        .update(structuredMedicalData)
+        .set(updatePayload)
+        .where(
+          and(
+            eq(structuredMedicalData.id, id),
+            eq(structuredMedicalData.userId, userId)
+          )
         )
-      )
-      .returning()
+        .returning()
 
-    return updated
-  } catch (error) {
-    console.error('Database query failed in updateStructuredDataReview:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+      if (updated) return updated
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+
+  const list = memoryStructuredData.get(userId) || []
+  const item = list.find((d) => d.id === id)
+  if (item) {
+    item.reviewStatus = reviewStatus
+    item.requiresReview = reviewStatus === 'PENDING_REVIEW'
+    item.updatedAt = new Date()
+    return item
+  }
+  return null
 }

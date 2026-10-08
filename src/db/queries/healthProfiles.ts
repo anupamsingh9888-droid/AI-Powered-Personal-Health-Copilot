@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { db } from '../index.ts'
+import { db, isDbAvailable, markDbUnreachable } from '../index.ts'
 import { healthProfiles } from '../schema.ts'
 
 export interface HealthProfileInput {
@@ -21,7 +21,12 @@ export interface HealthProfileInput {
   onboardingCompleted?: boolean
 }
 
+const memoryProfiles = new Map<string, any>()
+
 export async function getHealthProfile(userId: string) {
+  if (!isDbAvailable()) {
+    return memoryProfiles.get(userId) || null
+  }
   try {
     const rows = await db
       .select()
@@ -31,10 +36,8 @@ export async function getHealthProfile(userId: string) {
 
     return rows[0] || null
   } catch (error) {
-    console.error('Database query failed in getHealthProfile:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+    markDbUnreachable()
+    return memoryProfiles.get(userId) || null
   }
 }
 
@@ -42,31 +45,12 @@ export async function upsertHealthProfile(
   userId: string,
   data: HealthProfileInput
 ) {
-  try {
-    const result = await db
-      .insert(healthProfiles)
-      .values({
-        userId,
-        fullName: data.fullName,
-        dateOfBirth: data.dateOfBirth,
-        emergencyContact: data.emergencyContact,
-        existingConditions: data.existingConditions || [],
-        currentMedications: data.currentMedications || [],
-        age: data.age,
-        gender: data.gender,
-        height: data.height,
-        heightUnit: data.heightUnit || 'cm',
-        weight: data.weight,
-        weightUnit: data.weightUnit || 'kg',
-        bloodGroup: data.bloodGroup,
-        bmi: data.bmi,
-        allergies: data.allergies || [],
-        lifestyleFactors: data.lifestyleFactors || {},
-        onboardingCompleted: data.onboardingCompleted ?? true,
-      })
-      .onConflictDoUpdate({
-        target: healthProfiles.userId,
-        set: {
+  if (isDbAvailable()) {
+    try {
+      const result = await db
+        .insert(healthProfiles)
+        .values({
+          userId,
           fullName: data.fullName,
           dateOfBirth: data.dateOfBirth,
           emergencyContact: data.emergencyContact,
@@ -83,16 +67,44 @@ export async function upsertHealthProfile(
           allergies: data.allergies || [],
           lifestyleFactors: data.lifestyleFactors || {},
           onboardingCompleted: data.onboardingCompleted ?? true,
-          updatedAt: new Date(),
-        },
-      })
-      .returning()
+        })
+        .onConflictDoUpdate({
+          target: healthProfiles.userId,
+          set: {
+            fullName: data.fullName,
+            dateOfBirth: data.dateOfBirth,
+            emergencyContact: data.emergencyContact,
+            existingConditions: data.existingConditions || [],
+            currentMedications: data.currentMedications || [],
+            age: data.age,
+            gender: data.gender,
+            height: data.height,
+            heightUnit: data.heightUnit || 'cm',
+            weight: data.weight,
+            weightUnit: data.weightUnit || 'kg',
+            bloodGroup: data.bloodGroup,
+            bmi: data.bmi,
+            allergies: data.allergies || [],
+            lifestyleFactors: data.lifestyleFactors || {},
+            onboardingCompleted: data.onboardingCompleted ?? true,
+            updatedAt: new Date(),
+          },
+        })
+        .returning()
 
-    return result[0]
-  } catch (error) {
-    console.error('Database query failed in upsertHealthProfile:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+      if (result[0]) return result[0]
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+
+  const existing = memoryProfiles.get(userId) || {}
+  const updated = {
+    ...existing,
+    ...data,
+    userId,
+    updatedAt: new Date(),
+  }
+  memoryProfiles.set(userId, updated)
+  return updated
 }

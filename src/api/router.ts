@@ -56,6 +56,8 @@ import {
   getAllStructuredMedicalData,
   updateStructuredDataReview,
 } from '../db/queries/structuredMedicalData.ts'
+import { processHealthChat } from '../services/healthChatService.ts'
+import { analyzeHealthTrends } from '../services/healthTrendService.ts'
 
 function sendJson(res: ServerResponse, status: number, data: any) {
   res.statusCode = status
@@ -310,6 +312,34 @@ export async function handleApiRoute(
       }
     }
 
+    if (pathname === '/api/health-metrics/batch' && method === 'POST') {
+      const body = await parseBody(req)
+      const list = Array.isArray(body) ? body : Array.isArray(body.metrics) ? body.metrics : [body]
+      const results = []
+      for (const item of list) {
+        if (item && item.metricType && item.value !== undefined) {
+          const rec = await recordHealthMetric(userId, item)
+          results.push(rec)
+        }
+      }
+      sendJson(res, 201, results)
+      return true
+    }
+
+    // AI Health Chat (Phase 1)
+    if (pathname === '/api/chat/ask' && method === 'POST') {
+      const body = await parseBody(req)
+      const message = body.message || body.prompt || body.text || ''
+      const sessionId = body.sessionId ? Number(body.sessionId) : undefined
+      const response = await processHealthChat({
+        userId,
+        userMessage: message,
+        sessionId,
+      })
+      sendJson(res, 200, response)
+      return true
+    }
+
     // 8. Chat Sessions & Messages
     if (pathname === '/api/chat/sessions') {
       if (method === 'GET') {
@@ -384,6 +414,13 @@ export async function handleApiRoute(
       const iId = parseInt(ackInsightMatch[1], 10)
       const updated = await acknowledgeInsight(userId, iId)
       sendJson(res, 200, updated)
+      return true
+    }
+
+    // Health Trends Engine & AI Insights (Phases 3 & 4)
+    if ((pathname === '/api/trends' || pathname === '/api/trends/analyze') && (method === 'GET' || method === 'POST')) {
+      const trendResult = await analyzeHealthTrends(userId)
+      sendJson(res, 200, trendResult)
       return true
     }
 
@@ -587,7 +624,7 @@ export async function handleApiRoute(
     sendJson(res, 404, { error: 'API endpoint not found' })
     return true
   } catch (error: any) {
-    console.error('Unhandled API error:', error)
+    console.warn('API error encountered:', error)
     sendJson(res, 500, {
       error: error.message || 'Internal server error while accessing database',
     })

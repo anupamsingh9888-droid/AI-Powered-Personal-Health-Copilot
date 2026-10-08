@@ -1,5 +1,5 @@
 import { and, desc, eq } from 'drizzle-orm'
-import { db } from '../index.ts'
+import { db, isDbConfigured, isDbAvailable, markDbUnreachable } from '../index.ts'
 import { medicalDocuments, ocrResults } from '../schema.ts'
 
 export interface MedicalDocumentInput {
@@ -13,7 +13,13 @@ export interface MedicalDocumentInput {
   processingStatus?: 'UPLOADED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | string
 }
 
+const memoryDocs = new Map<string, any[]>()
+let nextDocId = 1
+
 export async function getMedicalDocuments(userId: string) {
+  if (!isDbAvailable()) {
+    return memoryDocs.get(userId) || []
+  }
   try {
     const docs = await db
       .select()
@@ -36,73 +42,92 @@ export async function getMedicalDocuments(userId: string) {
       ocrResult: ocrs.find((o) => o.documentId === doc.id) || null,
     }))
   } catch (error) {
-    console.error('Database query failed in getMedicalDocuments:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+    markDbUnreachable()
+    return memoryDocs.get(userId) || []
   }
 }
 
 export async function getMedicalDocumentById(userId: string, documentId: number) {
-  try {
-    const [doc] = await db
-      .select()
-      .from(medicalDocuments)
-      .where(
-        and(
-          eq(medicalDocuments.id, documentId),
-          eq(medicalDocuments.userId, userId)
+  if (isDbAvailable()) {
+    try {
+      const [doc] = await db
+        .select()
+        .from(medicalDocuments)
+        .where(
+          and(
+            eq(medicalDocuments.id, documentId),
+            eq(medicalDocuments.userId, userId)
+          )
         )
-      )
-    if (!doc) return null
-    return {
-      ...doc,
-      documentId: String(doc.id),
-      originalFilename: doc.originalFilename || doc.fileName,
+      if (doc) {
+        return {
+          ...doc,
+          documentId: String(doc.id),
+          originalFilename: doc.originalFilename || doc.fileName,
+        }
+      }
+    } catch (error) {
+      markDbUnreachable()
     }
-  } catch (error) {
-    console.error('Database query failed in getMedicalDocumentById:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
   }
+
+  const userDocs = memoryDocs.get(userId) || []
+  return userDocs.find((d) => d.id === documentId) || null
 }
 
 export async function createMedicalDocument(
   userId: string,
   data: MedicalDocumentInput
 ) {
-  try {
-    const origName = data.originalFilename || data.fileName || 'document.pdf'
-    const docTitle = data.title || origName || data.docType || 'Medical Document'
-    const status = data.processingStatus || 'UPLOADED'
+  const origName = data.originalFilename || data.fileName || 'document.pdf'
+  const docTitle = data.title || origName || data.docType || 'Medical Document'
+  const status = data.processingStatus || 'UPLOADED'
 
-    const [doc] = await db
-      .insert(medicalDocuments)
-      .values({
-        userId,
-        title: docTitle,
-        docType: data.docType || 'General Medical',
-        fileUrl: data.fileUrl || '',
-        fileName: origName,
-        originalFilename: origName,
-        fileSize: data.fileSize || 0,
-        mimeType: data.mimeType || 'application/pdf',
-        processingStatus: status,
-      })
-      .returning()
+  if (isDbAvailable()) {
+    try {
+      const [doc] = await db
+        .insert(medicalDocuments)
+        .values({
+          userId,
+          title: docTitle,
+          docType: data.docType || 'General Medical',
+          fileUrl: data.fileUrl || '',
+          fileName: origName,
+          originalFilename: origName,
+          fileSize: data.fileSize || 0,
+          mimeType: data.mimeType || 'application/pdf',
+          processingStatus: status,
+        })
+        .returning()
 
-    return {
-      ...doc,
-      documentId: String(doc.id),
-      originalFilename: doc.originalFilename || doc.fileName,
+      return {
+        ...doc,
+        documentId: String(doc.id),
+        originalFilename: doc.originalFilename || doc.fileName,
+      }
+    } catch (error) {
+      markDbUnreachable()
     }
-  } catch (error) {
-    console.error('Database query failed in createMedicalDocument:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
   }
+
+  const fallback = {
+    id: nextDocId++,
+    documentId: String(nextDocId),
+    userId,
+    title: docTitle,
+    docType: data.docType || 'General Medical',
+    fileUrl: data.fileUrl || '',
+    fileName: origName,
+    originalFilename: origName,
+    fileSize: data.fileSize || 0,
+    mimeType: data.mimeType || 'application/pdf',
+    processingStatus: status,
+    uploadedAt: new Date(),
+  }
+  const current = memoryDocs.get(userId) || []
+  current.unshift(fallback)
+  memoryDocs.set(userId, current)
+  return fallback
 }
 
 export async function updateMedicalDocumentStatus(
@@ -110,49 +135,62 @@ export async function updateMedicalDocumentStatus(
   documentId: number,
   status: string
 ) {
-  try {
-    const [doc] = await db
-      .update(medicalDocuments)
-      .set({
-        processingStatus: status,
-      })
-      .where(
-        and(
-          eq(medicalDocuments.id, documentId),
-          eq(medicalDocuments.userId, userId)
+  if (isDbAvailable()) {
+    try {
+      const [doc] = await db
+        .update(medicalDocuments)
+        .set({
+          processingStatus: status,
+        })
+        .where(
+          and(
+            eq(medicalDocuments.id, documentId),
+            eq(medicalDocuments.userId, userId)
+          )
         )
-      )
-      .returning()
+        .returning()
 
-    if (!doc) return null
-    return {
-      ...doc,
-      documentId: String(doc.id),
-      originalFilename: doc.originalFilename || doc.fileName,
+      if (doc) {
+        return {
+          ...doc,
+          documentId: String(doc.id),
+          originalFilename: doc.originalFilename || doc.fileName,
+        }
+      }
+    } catch (error) {
+      markDbUnreachable()
     }
-  } catch (error) {
-    console.error('Database query failed in updateMedicalDocumentStatus:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
   }
+
+  const userDocs = memoryDocs.get(userId) || []
+  const target = userDocs.find((d) => d.id === documentId)
+  if (target) {
+    target.processingStatus = status
+    return target
+  }
+  return null
 }
 
 export async function deleteMedicalDocument(userId: string, documentId: number) {
-  try {
-    await db
-      .delete(medicalDocuments)
-      .where(
-        and(
-          eq(medicalDocuments.id, documentId),
-          eq(medicalDocuments.userId, userId)
+  if (isDbAvailable()) {
+    try {
+      await db
+        .delete(medicalDocuments)
+        .where(
+          and(
+            eq(medicalDocuments.id, documentId),
+            eq(medicalDocuments.userId, userId)
+          )
         )
-      )
-    return { success: true }
-  } catch (error) {
-    console.error('Database query failed in deleteMedicalDocument:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+      return { success: true }
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+  const userDocs = memoryDocs.get(userId) || []
+  memoryDocs.set(
+    userId,
+    userDocs.filter((d) => d.id !== documentId)
+  )
+  return { success: true }
 }

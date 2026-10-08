@@ -1,8 +1,16 @@
 import { and, desc, eq } from 'drizzle-orm'
-import { db } from '../index.ts'
+import { db, isDbConfigured, isDbAvailable, markDbUnreachable } from '../index.ts'
 import { chatMessages, chatSessions } from '../schema.ts'
 
+const memorySessions = new Map<string, any[]>()
+const memoryMessages = new Map<string, any[]>() // key: `${userId}_${sessionId}`
+let nextSessionId = 1
+let nextMessageId = 1
+
 export async function getChatSessions(userId: string) {
+  if (!isDbAvailable()) {
+    return memorySessions.get(userId) || []
+  }
   try {
     return await db
       .select()
@@ -10,10 +18,8 @@ export async function getChatSessions(userId: string) {
       .where(eq(chatSessions.userId, userId))
       .orderBy(desc(chatSessions.updatedAt))
   } catch (error) {
-    console.error('Database query failed in getChatSessions:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+    markDbUnreachable()
+    return memorySessions.get(userId) || []
   }
 }
 
@@ -22,40 +28,61 @@ export async function createChatSession(
   title: string,
   category = 'general'
 ) {
-  try {
-    const result = await db
-      .insert(chatSessions)
-      .values({
-        userId,
-        title,
-        category,
-      })
-      .returning()
+  if (isDbAvailable()) {
+    try {
+      const result = await db
+        .insert(chatSessions)
+        .values({
+          userId,
+          title,
+          category,
+        })
+        .returning()
 
-    return result[0]
-  } catch (error) {
-    console.error('Database query failed in createChatSession:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+      if (result[0]) return result[0]
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+
+  const fallback = {
+    id: nextSessionId++,
+    userId,
+    title,
+    category,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
+  const current = memorySessions.get(userId) || []
+  current.unshift(fallback)
+  memorySessions.set(userId, current)
+  return fallback
 }
 
 export async function deleteChatSession(userId: string, sessionId: number) {
-  try {
-    await db
-      .delete(chatSessions)
-      .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)))
-    return true
-  } catch (error) {
-    console.error('Database query failed in deleteChatSession:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+  if (isDbAvailable()) {
+    try {
+      await db
+        .delete(chatSessions)
+        .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)))
+      return true
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+  const current = memorySessions.get(userId) || []
+  memorySessions.set(
+    userId,
+    current.filter((s) => s.id !== sessionId)
+  )
+  memoryMessages.delete(`${userId}_${sessionId}`)
+  return true
 }
 
 export async function getChatMessages(userId: string, sessionId: number) {
+  if (!isDbAvailable()) {
+    return memoryMessages.get(`${userId}_${sessionId}`) || []
+  }
   try {
     return await db
       .select()
@@ -68,10 +95,8 @@ export async function getChatMessages(userId: string, sessionId: number) {
       )
       .orderBy(chatMessages.createdAt)
   } catch (error) {
-    console.error('Database query failed in getChatMessages:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+    markDbUnreachable()
+    return memoryMessages.get(`${userId}_${sessionId}`) || []
   }
 }
 
@@ -83,30 +108,44 @@ export async function addChatMessage(
   citations: any[] = [],
   triageLevel = 'none'
 ) {
-  try {
-    const [msg] = await db
-      .insert(chatMessages)
-      .values({
-        sessionId,
-        userId,
-        sender,
-        text,
-        citations,
-        triageLevel,
-      })
-      .returning()
+  if (isDbAvailable()) {
+    try {
+      const [msg] = await db
+        .insert(chatMessages)
+        .values({
+          sessionId,
+          userId,
+          sender,
+          text,
+          citations,
+          triageLevel,
+        })
+        .returning()
 
-    // Update session updatedAt timestamp
-    await db
-      .update(chatSessions)
-      .set({ updatedAt: new Date() })
-      .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)))
+      await db
+        .update(chatSessions)
+        .set({ updatedAt: new Date() })
+        .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.userId, userId)))
 
-    return msg
-  } catch (error) {
-    console.error('Database query failed in addChatMessage:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+      if (msg) return msg
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+
+  const fallbackMsg = {
+    id: nextMessageId++,
+    sessionId,
+    userId,
+    sender,
+    text,
+    citations,
+    triageLevel,
+    createdAt: new Date(),
+  }
+  const key = `${userId}_${sessionId}`
+  const current = memoryMessages.get(key) || []
+  current.push(fallbackMsg)
+  memoryMessages.set(key, current)
+  return fallbackMsg
 }

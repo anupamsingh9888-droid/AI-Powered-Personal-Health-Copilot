@@ -223,7 +223,7 @@ export function Documents() {
       )
       await loadDocuments()
     } catch (err: any) {
-      console.error('Error storing document in PostgreSQL:', err)
+      console.warn('Could not store document in PostgreSQL:', err)
       toast(err.message || 'Failed to save document metadata in PostgreSQL', 'warn')
     }
   }
@@ -293,7 +293,7 @@ export function Documents() {
             setCurrentDoc(updated)
             loadDocuments()
           })
-          .catch(console.error)
+          .catch(console.warn)
       }
       setPhase('processing')
     }
@@ -310,7 +310,7 @@ export function Documents() {
         setCurrentDoc(updated)
         await loadDocuments()
       } catch (e) {
-        console.error('Failed to update status to COMPLETED:', e)
+        console.warn('Failed to update status to COMPLETED:', e)
       }
     }
     setPhase('review')

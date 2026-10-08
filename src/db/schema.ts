@@ -1,6 +1,7 @@
 import { relations } from 'drizzle-orm'
 import {
   boolean,
+  index,
   integer,
   jsonb,
   numeric,
@@ -193,17 +194,24 @@ export const symptoms = pgTable('symptoms', {
 })
 
 // 10. Health Metrics
-export const healthMetrics = pgTable('health_metrics', {
-  id: serial('id').primaryKey(),
-  userId: text('user_id')
-    .references(() => users.uid, { onDelete: 'cascade' })
-    .notNull(),
-  metricType: text('metric_type').notNull(),
-  value: numeric('value', { precision: 6, scale: 2 }).notNull(),
-  unit: text('unit').notNull(),
-  recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
-  source: text('source').default('manual'),
-})
+export const healthMetrics = pgTable(
+  'health_metrics',
+  {
+    id: serial('id').primaryKey(),
+    userId: text('user_id')
+      .references(() => users.uid, { onDelete: 'cascade' })
+      .notNull(),
+    metricType: text('metric_type').notNull(),
+    value: numeric('value', { precision: 6, scale: 2 }).notNull(),
+    unit: text('unit').notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
+    source: text('source').default('manual'),
+  },
+  (table) => [
+    index('idx_health_metrics_user_recorded').on(table.userId, table.recordedAt),
+    index('idx_health_metrics_user_type_recorded').on(table.userId, table.metricType, table.recordedAt),
+  ]
+)
 
 // 11. Chat Sessions
 export const chatSessions = pgTable('chat_sessions', {
@@ -218,20 +226,27 @@ export const chatSessions = pgTable('chat_sessions', {
 })
 
 // 12. Chat Messages
-export const chatMessages = pgTable('chat_messages', {
-  id: serial('id').primaryKey(),
-  sessionId: integer('session_id')
-    .references(() => chatSessions.id, { onDelete: 'cascade' })
-    .notNull(),
-  userId: text('user_id')
-    .references(() => users.uid, { onDelete: 'cascade' })
-    .notNull(),
-  sender: text('sender').notNull(),
-  text: text('text').notNull(),
-  citations: jsonb('citations').default([]),
-  triageLevel: text('triage_level').default('none'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-})
+export const chatMessages = pgTable(
+  'chat_messages',
+  {
+    id: serial('id').primaryKey(),
+    sessionId: integer('session_id')
+      .references(() => chatSessions.id, { onDelete: 'cascade' })
+      .notNull(),
+    userId: text('user_id')
+      .references(() => users.uid, { onDelete: 'cascade' })
+      .notNull(),
+    sender: text('sender').notNull(),
+    text: text('text').notNull(),
+    citations: jsonb('citations').default([]),
+    triageLevel: text('triage_level').default('none'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index('idx_chat_messages_session_created').on(table.sessionId, table.createdAt),
+    index('idx_chat_messages_user_created').on(table.userId, table.createdAt),
+  ]
+)
 
 // 13. Health Insights
 export const healthInsights = pgTable('health_insights', {

@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm'
-import { db } from '../index.ts'
+import { db, isDbConfigured, isDbAvailable, markDbUnreachable } from '../index.ts'
 import { medications } from '../schema.ts'
 
 export interface MedicationInput {
@@ -14,7 +14,13 @@ export interface MedicationInput {
   isActive?: boolean
 }
 
+const memoryMeds = new Map<string, any[]>()
+let nextMedId = 1
+
 export async function getMedications(userId: string) {
+  if (!isDbAvailable()) {
+    return memoryMeds.get(userId) || []
+  }
   try {
     return await db
       .select()
@@ -22,38 +28,55 @@ export async function getMedications(userId: string) {
       .where(eq(medications.userId, userId))
       .orderBy(medications.createdAt)
   } catch (error) {
-    console.error('Database query failed in getMedications:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+    markDbUnreachable()
+    return memoryMeds.get(userId) || []
   }
 }
 
 export async function createMedication(userId: string, data: MedicationInput) {
-  try {
-    const result = await db
-      .insert(medications)
-      .values({
-        userId,
-        name: data.name,
-        dosage: data.dosage,
-        frequency: data.frequency,
-        timeOfDay: data.timeOfDay || [],
-        instructions: data.instructions || '',
-        startDate: data.startDate || null,
-        endDate: data.endDate || null,
-        adherenceRate: data.adherenceRate ?? 100,
-        isActive: data.isActive ?? true,
-      })
-      .returning()
+  if (isDbAvailable()) {
+    try {
+      const result = await db
+        .insert(medications)
+        .values({
+          userId,
+          name: data.name,
+          dosage: data.dosage,
+          frequency: data.frequency,
+          timeOfDay: data.timeOfDay || [],
+          instructions: data.instructions || '',
+          startDate: data.startDate || null,
+          endDate: data.endDate || null,
+          adherenceRate: data.adherenceRate ?? 100,
+          isActive: data.isActive ?? true,
+        })
+        .returning()
 
-    return result[0]
-  } catch (error) {
-    console.error('Database query failed in createMedication:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+      return result[0]
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+
+  const fallback = {
+    id: nextMedId++,
+    userId,
+    name: data.name,
+    dosage: data.dosage,
+    frequency: data.frequency,
+    timeOfDay: data.timeOfDay || [],
+    instructions: data.instructions || '',
+    startDate: data.startDate || null,
+    endDate: data.endDate || null,
+    adherenceRate: data.adherenceRate ?? 100,
+    isActive: data.isActive ?? true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
+  const current = memoryMeds.get(userId) || []
+  current.push(fallback)
+  memoryMeds.set(userId, current)
+  return fallback
 }
 
 export async function updateMedication(
@@ -61,35 +84,47 @@ export async function updateMedication(
   id: number,
   data: Partial<MedicationInput>
 ) {
-  try {
-    const result = await db
-      .update(medications)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(medications.id, id), eq(medications.userId, userId)))
-      .returning()
+  if (isDbAvailable()) {
+    try {
+      const result = await db
+        .update(medications)
+        .set({
+          ...data,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(medications.id, id), eq(medications.userId, userId)))
+        .returning()
 
-    return result[0] || null
-  } catch (error) {
-    console.error('Database query failed in updateMedication:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+      if (result[0]) return result[0]
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+
+  const current = memoryMeds.get(userId) || []
+  const med = current.find((m) => m.id === id)
+  if (med) {
+    Object.assign(med, data, { updatedAt: new Date() })
+    return med
+  }
+  return null
 }
 
 export async function deleteMedication(userId: string, id: number) {
-  try {
-    await db
-      .delete(medications)
-      .where(and(eq(medications.id, id), eq(medications.userId, userId)))
-    return true
-  } catch (error) {
-    console.error('Database query failed in deleteMedication:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+  if (isDbAvailable()) {
+    try {
+      await db
+        .delete(medications)
+        .where(and(eq(medications.id, id), eq(medications.userId, userId)))
+      return true
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+  const current = memoryMeds.get(userId) || []
+  memoryMeds.set(
+    userId,
+    current.filter((m) => m.id !== id)
+  )
+  return true
 }

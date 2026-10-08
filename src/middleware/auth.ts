@@ -41,7 +41,7 @@ export async function verifyTokenFromHeader(
       picture: decoded.picture,
     }
   } catch (error) {
-    console.error('Error verifying Firebase ID token:', error)
+    console.warn('Firebase ID token verification failed:', error)
     return null
   }
 }

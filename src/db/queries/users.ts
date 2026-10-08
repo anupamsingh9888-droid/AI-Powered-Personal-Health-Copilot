@@ -1,6 +1,8 @@
 import { eq } from 'drizzle-orm'
-import { db } from '../index.ts'
+import { db, isDbAvailable, markDbUnreachable } from '../index.ts'
 import { users } from '../schema.ts'
+
+const memoryUsers = new Map<string, any>()
 
 export async function getOrCreateUser(
   uid: string,
@@ -8,43 +10,55 @@ export async function getOrCreateUser(
   displayName?: string,
   photoUrl?: string
 ) {
-  try {
-    const result = await db
-      .insert(users)
-      .values({
-        uid,
-        email: email || `${uid}@unknown.com`,
-        displayName: displayName || null,
-        photoUrl: photoUrl || null,
-      })
-      .onConflictDoUpdate({
-        target: users.uid,
-        set: {
+  if (isDbAvailable()) {
+    try {
+      const result = await db
+        .insert(users)
+        .values({
+          uid,
           email: email || `${uid}@unknown.com`,
           displayName: displayName || null,
           photoUrl: photoUrl || null,
-          updatedAt: new Date(),
-        },
-      })
-      .returning()
+        })
+        .onConflictDoUpdate({
+          target: users.uid,
+          set: {
+            email: email || `${uid}@unknown.com`,
+            displayName: displayName || null,
+            photoUrl: photoUrl || null,
+            updatedAt: new Date(),
+          },
+        })
+        .returning()
 
-    return result[0]
-  } catch (error) {
-    console.error('Database query failed in getOrCreateUser:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+      if (result[0]) return result[0]
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+
+  const existing = memoryUsers.get(uid) || {
+    uid,
+    email: email || `${uid}@unknown.com`,
+    displayName: displayName || null,
+    photoUrl: photoUrl || null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
+  if (displayName) existing.displayName = displayName
+  if (email) existing.email = email
+  memoryUsers.set(uid, existing)
+  return existing
 }
 
 export async function getUserByUid(uid: string) {
-  try {
-    const rows = await db.select().from(users).where(eq(users.uid, uid)).limit(1)
-    return rows[0] || null
-  } catch (error) {
-    console.error('Database query failed in getUserByUid:', error)
-    throw new Error('Database query failed. Please try again later.', {
-      cause: error,
-    })
+  if (isDbAvailable()) {
+    try {
+      const rows = await db.select().from(users).where(eq(users.uid, uid)).limit(1)
+      if (rows[0]) return rows[0]
+    } catch (error) {
+      markDbUnreachable()
+    }
   }
+  return memoryUsers.get(uid) || null
 }

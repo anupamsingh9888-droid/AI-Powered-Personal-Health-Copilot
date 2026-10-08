@@ -6,16 +6,27 @@ import { fileURLToPath } from 'node:url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const PORT = parseInt(process.env.PORT || '3000', 10)
+const PORT = parseInt(
+  process.env.APP_PORT ||
+  process.env.DEFAULT_APP_PORT ||
+  (process.env.PORT && process.env.PORT !== '8080' ? process.env.PORT : '3000'),
+  10
+)
 const HOST = '0.0.0.0'
 
-// Detect dist directory
-let DIST_DIR = path.join(__dirname, 'dist')
-if (!fs.existsSync(DIST_DIR) || !fs.existsSync(path.join(DIST_DIR, 'index.html'))) {
-  const altDist = path.join(__dirname, 'frontend', 'dist')
-  if (fs.existsSync(altDist) && fs.existsSync(path.join(altDist, 'index.html'))) {
-    DIST_DIR = altDist
+function getDistDir(): string {
+  const candidates = [
+    path.join(__dirname, 'dist'),
+    path.join(__dirname, 'frontend', 'dist'),
+    path.join(process.cwd(), 'dist'),
+    path.join(process.cwd(), 'frontend', 'dist'),
+  ]
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, 'index.html'))) {
+      return candidate
+    }
   }
+  return path.join(__dirname, 'dist')
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -27,6 +38,7 @@ const MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
   '.gif': 'image/gif',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
@@ -34,22 +46,32 @@ const MIME_TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
   '.ttf': 'font/ttf',
   '.txt': 'text/plain; charset=utf-8',
+  '.pdf': 'application/pdf',
+  '.map': 'application/json',
+  '.webmanifest': 'application/manifest+json',
 }
 
 const server = http.createServer((req, res) => {
-  // Respond immediately to health checks
+  const method = req.method || 'GET'
   const urlPath = req.url?.split('?')[0] || '/'
-  if (urlPath === '/_health' || urlPath === '/healthz' || urlPath === '/health') {
-    res.writeHead(200, { 'Content-Type': 'text/plain' })
-    res.end('OK')
+
+  // Health check endpoints for Cloud Run & container orchestrators
+  if (urlPath === '/_health' || urlPath === '/healthz' || urlPath === '/health' || urlPath === '/status') {
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    })
+    res.end(method === 'HEAD' ? undefined : 'OK')
     return
   }
 
-  let reqPath = decodeURIComponent(urlPath)
-  let filePath = path.join(DIST_DIR, reqPath)
+  const distDir = getDistDir()
+  const reqPath = decodeURIComponent(urlPath)
+  let filePath = path.join(distDir, reqPath)
 
-  if (!filePath.startsWith(DIST_DIR)) {
-    res.writeHead(403)
+  // Security guard against path traversal
+  if (!filePath.startsWith(distDir)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' })
     res.end('Forbidden')
     return
   }
@@ -58,36 +80,50 @@ const server = http.createServer((req, res) => {
     if (!err && stats.isFile()) {
       const ext = path.extname(filePath).toLowerCase()
       const contentType = MIME_TYPES[ext] || 'application/octet-stream'
-      const headers: Record<string, string> = { 'Content-Type': contentType }
-
-      if (reqPath.startsWith('/assets/')) {
-        headers['Cache-Control'] = 'public, max-age=31536000, immutable'
-      } else {
-        headers['Cache-Control'] = 'no-cache'
+      const isStaticAsset = reqPath.startsWith('/assets/') || ext === '.js' || ext === '.css'
+      const headers: Record<string, string> = {
+        'Content-Type': contentType,
+        'Cache-Control': isStaticAsset ? 'public, max-age=31536000, immutable' : 'no-cache',
       }
 
       res.writeHead(200, headers)
-      fs.createReadStream(filePath).pipe(res)
+      if (method === 'HEAD') {
+        res.end()
+      } else {
+        fs.createReadStream(filePath).pipe(res)
+      }
       return
     }
 
-    // SPA fallback: return index.html
-    const indexPath = path.join(DIST_DIR, 'index.html')
+    // SPA fallback: return index.html for all non-file routes
+    const indexPath = path.join(distDir, 'index.html')
     fs.readFile(indexPath, (indexErr, content) => {
       if (indexErr) {
         res.writeHead(500, { 'Content-Type': 'text/plain' })
-        res.end('Build index.html not found. Please build the application first.')
+        res.end('Build artifacts not found. Please verify npm run build.')
         return
       }
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-cache',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
       })
-      res.end(content)
+      res.end(method === 'HEAD' ? undefined : content)
     })
   })
 })
 
 server.listen(PORT, HOST, () => {
-  console.log(`[HealthLens Server] Serving ${DIST_DIR} on http://${HOST}:${PORT}`)
+  console.log(`[HealthLens Server] Serving on http://${HOST}:${PORT}`)
+})
+
+// Graceful shutdown on termination signals from Cloud Run
+process.on('SIGTERM', () => {
+  server.close(() => {
+    process.exit(0)
+  })
+})
+process.on('SIGINT', () => {
+  server.close(() => {
+    process.exit(0)
+  })
 })

@@ -1,20 +1,19 @@
-import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 
-import siteConfiguration from './.figma/make/site.json' with { type: 'json' }
-
-
-// Vite config — https://vitejs.dev/config/
+// Vite config
 export default defineConfig(({ mode }) => {
-  // .figma/make/deploy-preview passes `--mode development` for cached-preview builds.
   const emitSourcemaps = mode === 'development'
 
   return {
+    // GitHub Pages repository path
     base: '/AI-Powered-Personal-Health-Copilot/',
 
     build: {
+      // IMPORTANT:
+      // frontend/dist nahi, repository root/dist generate hoga
       outDir: path.resolve(import.meta.dirname, '../dist'),
       emptyOutDir: true,
       sourcemap: emitSourcemaps ? 'inline' : false,
@@ -24,11 +23,6 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       tailwindcss(),
-      figmaSiteConfiguration(siteConfiguration),
-      figmaErrorOverlayReplay(),
-      figmaReactRefreshBoundaryFallback(),
-      figmaMakeKitPlugin({ storiesGlob: '/src/**/*.stories.{ts,tsx,js,jsx}' }),
-      cloudsqlApiPlugin(),
     ],
 
     resolve: {
